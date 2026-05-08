@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
-from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from app.config import (
     APP_NAME,
@@ -10,9 +9,7 @@ from app.config import (
     TYPE_DELAY_MAX_SECONDS,
     TYPE_DELAY_MIN_SECONDS,
     TYPE_SPEED_SLIDER_MAX,
-    TRAY_TOOLTIP,
 )
-from app.resources import build_app_icon
 from app.services.typing_service import TextTypingService
 from app.ui.countdown_overlay import CountdownOverlay
 from app.ui.editor_window import EditorWindow
@@ -37,7 +34,7 @@ class TypingWorker(QObject):
         self.finished.emit(True, "Yazma işlemi tamamlandı")
 
 
-class TrayApplication(QObject):
+class WindowApplication(QObject):
     def __init__(self, qt_app: QApplication) -> None:
         super().__init__()
         self._qt_app = qt_app
@@ -45,6 +42,8 @@ class TrayApplication(QObject):
         self._editor_window = EditorWindow()
         self._editor_window.run_requested.connect(self._handle_run_requested)
         self._editor_window.speed_changed.connect(self._handle_speed_changed)
+        self._editor_window.close_requested.connect(self.exit_application)
+
         self._countdown_overlay = CountdownOverlay()
         self._countdown_timer = QTimer(self)
         self._countdown_timer.setInterval(1000)
@@ -58,49 +57,11 @@ class TrayApplication(QObject):
         self._pending_text = ""
         self._pending_exit = False
 
-        self._tray_icon = self._create_tray_icon()
         self._editor_window.set_speed_value(10)
         self._apply_speed_slider_value(10)
 
     def start(self) -> None:
-        if not QSystemTrayIcon.isSystemTrayAvailable():
-            QMessageBox.critical(
-                None,
-                APP_NAME,
-                "Sistem tepsisi bu cihazda kullanılamıyor. Uygulama başlatılamadı.",
-            )
-            raise SystemExit(1)
-
-        self._tray_icon.show()
-        self.show_editor()
-
-    def _create_tray_icon(self) -> QSystemTrayIcon:
-        tray_icon = QSystemTrayIcon(build_app_icon(), self)
-        tray_icon.setToolTip(TRAY_TOOLTIP)
-        tray_icon.activated.connect(self._handle_tray_activated)
-
-        menu = QMenu()
-        open_action = QAction("Open", menu)
-        exit_action = QAction("Çıkış", menu)
-
-        open_action.triggered.connect(self.show_editor)
-        exit_action.triggered.connect(self.exit_application)
-
-        menu.addAction(open_action)
-        menu.addSeparator()
-        menu.addAction(exit_action)
-
-        tray_icon.setContextMenu(menu)
-        return tray_icon
-
-    @Slot()
-    def show_editor(self) -> None:
         self._editor_window.show_normal()
-
-    @Slot(QSystemTrayIcon.ActivationReason)
-    def _handle_tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
-        if reason in (QSystemTrayIcon.Trigger, QSystemTrayIcon.DoubleClick):
-            self.show_editor()
 
     @Slot(int)
     def _handle_speed_changed(self, value: int) -> None:
@@ -117,21 +78,11 @@ class TrayApplication(QObject):
     @Slot(str)
     def _handle_run_requested(self, text: str) -> None:
         if self._typing_in_progress or self._countdown_in_progress:
-            self._tray_icon.showMessage(
-                APP_NAME,
-                "Bir yazma işlemi zaten devam ediyor.",
-                QSystemTrayIcon.Warning,
-                2000,
-            )
+            self._editor_window.set_busy(True, "Bir yazma işlemi zaten devam ediyor.")
             return
 
         if not text:
-            self._tray_icon.showMessage(
-                APP_NAME,
-                "Önce yazılacak metni girin.",
-                QSystemTrayIcon.Information,
-                2000,
-            )
+            self._editor_window.set_busy(False, "Önce yazılacak metni girin.")
             self._editor_window.show_normal()
             return
 
@@ -178,31 +129,19 @@ class TrayApplication(QObject):
     def _finish_typing(self, success: bool, message: str) -> None:
         self._typing_in_progress = False
         self._pending_text = ""
-        self._editor_window.set_busy(False, "Hazır")
 
         if success:
+            self._editor_window.set_busy(False, message)
             if self._pending_exit:
                 self._quit_application()
-                return
-
-            self._tray_icon.showMessage(
-                APP_NAME,
-                message,
-                QSystemTrayIcon.Information,
-                2000,
-            )
             return
 
+        self._editor_window.set_busy(False, f"Yazma hatası: {message}")
         if self._pending_exit:
             self._quit_application()
             return
 
-        self._tray_icon.showMessage(
-            APP_NAME,
-            f"Yazma işlemi başarısız oldu: {message}",
-            QSystemTrayIcon.Critical,
-            4000,
-        )
+        QMessageBox.critical(self._editor_window, APP_NAME, message)
         self._editor_window.show_normal()
 
     @Slot()
@@ -219,12 +158,7 @@ class TrayApplication(QObject):
 
         if self._typing_in_progress:
             self._pending_exit = True
-            self._tray_icon.showMessage(
-                APP_NAME,
-                "Yazma işlemi tamamlanınca uygulama kapanacak.",
-                QSystemTrayIcon.Information,
-                2000,
-            )
+            self._editor_window.set_busy(True, "Yazma bitince uygulama kapanacak.")
             return
 
         self._quit_application()
@@ -238,6 +172,5 @@ class TrayApplication(QObject):
 
     def _quit_application(self) -> None:
         self._cancel_countdown()
-        self._tray_icon.hide()
         self._editor_window.prepare_for_exit()
         self._qt_app.quit()

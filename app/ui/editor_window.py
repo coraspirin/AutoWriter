@@ -25,6 +25,7 @@ from app.config import (
 class EditorWindow(QWidget):
     run_requested = Signal(str)
     speed_changed = Signal(int)
+    close_requested = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -101,7 +102,7 @@ class EditorWindow(QWidget):
         footer_layout.addWidget(self._status_label, 1, Qt.AlignVCenter)
 
         self._close_button = QPushButton("Kapat", root_panel)
-        self._close_button.clicked.connect(self.hide)
+        self._close_button.clicked.connect(self.close)
         footer_layout.addWidget(self._close_button)
 
         self._run_button = QPushButton("Çalıştır", root_panel)
@@ -123,6 +124,7 @@ class EditorWindow(QWidget):
     def set_busy(self, busy: bool, status_text: str | None = None) -> None:
         self._run_button.setDisabled(busy)
         self._speed_slider.setDisabled(busy)
+        self._close_button.setDisabled(False)
         if status_text is not None:
             self._status_label.setText(status_text)
             return
@@ -155,4 +157,4 @@ class EditorWindow(QWidget):
             return
 
         event.ignore()
-        self.hide()
+        self.close_requested.emit()
