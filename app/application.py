@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from threading import Event
+
 from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
 from PySide6.QtWidgets import QApplication, QMessageBox
 
@@ -10,28 +12,44 @@ from app.config import (
     TYPE_DELAY_MIN_SECONDS,
     TYPE_SPEED_SLIDER_MAX,
 )
+from app.services.exceptions import TypingCancelled
 from app.services.typing_service import TextTypingService
 from app.ui.countdown_overlay import CountdownOverlay
 from app.ui.editor_window import EditorWindow
 
 
 class TypingWorker(QObject):
-    finished = Signal(bool, str)
+    finished = Signal(bool, str, bool)
 
-    def __init__(self, typing_service: TextTypingService, text: str) -> None:
+    def __init__(
+        self,
+        typing_service: TextTypingService,
+        text: str,
+        browser_compatible: bool,
+        cancel_event: Event,
+    ) -> None:
         super().__init__()
         self._typing_service = typing_service
         self._text = text
+        self._browser_compatible = browser_compatible
+        self._cancel_event = cancel_event
 
     @Slot()
     def run(self) -> None:
         try:
-            self._typing_service.type_text(self._text)
+            self._typing_service.type_text(
+                self._text,
+                self._browser_compatible,
+                self._cancel_event,
+            )
+        except TypingCancelled as exc:
+            self.finished.emit(False, str(exc), True)
+            return
         except Exception as exc:  # pragma: no cover
-            self.finished.emit(False, str(exc))
+            self.finished.emit(False, str(exc), False)
             return
 
-        self.finished.emit(True, "Yazma işlemi tamamlandı")
+        self.finished.emit(True, "Yazma işlemi tamamlandı", False)
 
 
 class WindowApplication(QObject):
@@ -42,6 +60,7 @@ class WindowApplication(QObject):
         self._editor_window = EditorWindow()
         self._editor_window.run_requested.connect(self._handle_run_requested)
         self._editor_window.speed_changed.connect(self._handle_speed_changed)
+        self._editor_window.stop_requested.connect(self.stop_operation)
         self._editor_window.close_requested.connect(self.exit_application)
 
         self._countdown_overlay = CountdownOverlay()
@@ -51,10 +70,12 @@ class WindowApplication(QObject):
 
         self._typing_thread: QThread | None = None
         self._typing_worker: TypingWorker | None = None
+        self._cancel_event = Event()
         self._typing_in_progress = False
         self._countdown_in_progress = False
         self._countdown_remaining = 0
         self._pending_text = ""
+        self._pending_browser_mode = True
         self._pending_exit = False
 
         self._editor_window.set_speed_value(10)
@@ -75,8 +96,8 @@ class WindowApplication(QObject):
         line_break_delay_seconds = max(0.2, delay_seconds * 2)
         self._typing_service.set_timing(delay_seconds, line_break_delay_seconds)
 
-    @Slot(str)
-    def _handle_run_requested(self, text: str) -> None:
+    @Slot(str, bool)
+    def _handle_run_requested(self, text: str, browser_compatible: bool) -> None:
         if self._typing_in_progress or self._countdown_in_progress:
             self._editor_window.set_busy(True, "Bir yazma işlemi zaten devam ediyor.")
             return
@@ -87,9 +108,11 @@ class WindowApplication(QObject):
             return
 
         self._pending_text = text
+        self._pending_browser_mode = browser_compatible
         self._begin_countdown()
 
     def _begin_countdown(self) -> None:
+        self._cancel_event.clear()
         self._countdown_in_progress = True
         self._countdown_remaining = COUNTDOWN_SECONDS
         self._editor_window.set_busy(True, f"Geri sayım: {self._countdown_remaining} sn")
@@ -109,11 +132,17 @@ class WindowApplication(QObject):
         self._countdown_overlay.hide()
         self._typing_in_progress = True
         self._editor_window.set_busy(True, "Yazılıyor...")
-        self._start_typing(self._pending_text)
+        self._start_typing(self._pending_text, self._pending_browser_mode)
 
-    def _start_typing(self, text: str) -> None:
+    def _start_typing(self, text: str, browser_compatible: bool) -> None:
+        self._cancel_event.clear()
         self._typing_thread = QThread(self)
-        self._typing_worker = TypingWorker(self._typing_service, text)
+        self._typing_worker = TypingWorker(
+            self._typing_service,
+            text,
+            browser_compatible,
+            self._cancel_event,
+        )
         self._typing_worker.moveToThread(self._typing_thread)
 
         self._typing_thread.started.connect(self._typing_worker.run)
@@ -125,22 +154,25 @@ class WindowApplication(QObject):
 
         self._typing_thread.start()
 
-    @Slot(bool, str)
-    def _finish_typing(self, success: bool, message: str) -> None:
+    @Slot(bool, str, bool)
+    def _finish_typing(self, success: bool, message: str, cancelled: bool) -> None:
         self._typing_in_progress = False
         self._pending_text = ""
+        self._cancel_event.clear()
 
-        if success:
-            self._editor_window.set_busy(False, message)
-            if self._pending_exit:
-                self._quit_application()
-            return
-
-        self._editor_window.set_busy(False, f"Yazma hatası: {message}")
         if self._pending_exit:
             self._quit_application()
             return
 
+        if cancelled:
+            self._editor_window.set_busy(False, "İşlem durduruldu.")
+            return
+
+        if success:
+            self._editor_window.set_busy(False, message)
+            return
+
+        self._editor_window.set_busy(False, f"Yazma hatası: {message}")
         QMessageBox.critical(self._editor_window, APP_NAME, message)
         self._editor_window.show_normal()
 
@@ -148,6 +180,20 @@ class WindowApplication(QObject):
     def _clear_worker_references(self) -> None:
         self._typing_thread = None
         self._typing_worker = None
+
+    @Slot()
+    def stop_operation(self) -> None:
+        if self._countdown_in_progress:
+            self._cancel_countdown()
+            self._editor_window.set_busy(False, "İşlem durduruldu.")
+            return
+
+        if self._typing_in_progress:
+            self._cancel_event.set()
+            self._editor_window.set_busy(True, "Durduruluyor...")
+            return
+
+        self._editor_window.set_busy(False, "Hazır")
 
     @Slot()
     def exit_application(self) -> None:
@@ -158,7 +204,8 @@ class WindowApplication(QObject):
 
         if self._typing_in_progress:
             self._pending_exit = True
-            self._editor_window.set_busy(True, "Yazma bitince uygulama kapanacak.")
+            self._cancel_event.set()
+            self._editor_window.set_busy(True, "Kapatılıyor...")
             return
 
         self._quit_application()

@@ -3,6 +3,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
+    QCheckBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -23,18 +24,15 @@ from app.config import (
 
 
 class EditorWindow(QWidget):
-    run_requested = Signal(str)
+    run_requested = Signal(str, bool)
     speed_changed = Signal(int)
+    stop_requested = Signal()
     close_requested = Signal()
 
     def __init__(self) -> None:
         super().__init__()
         self._allow_close = False
         self._build_ui()
-
-    @property
-    def text_edit(self) -> QTextEdit:
-        return self._text_edit
 
     def _build_ui(self) -> None:
         self.setWindowTitle(WINDOW_TITLE)
@@ -58,6 +56,13 @@ class EditorWindow(QWidget):
             "Yazdırılacak metni buraya girin. Satırlar ve özel karakterler korunur."
         )
         panel_layout.addWidget(self._text_edit, 1)
+
+        self._browser_mode_checkbox = QCheckBox(
+            "Browser / RDP uyumlu mod (fiziksel tuşlar)",
+            root_panel,
+        )
+        self._browser_mode_checkbox.setChecked(True)
+        panel_layout.addWidget(self._browser_mode_checkbox)
 
         speed_card = QFrame(root_panel)
         speed_card.setObjectName("SpeedCard")
@@ -101,9 +106,9 @@ class EditorWindow(QWidget):
         self._status_label.setObjectName("StatusLabel")
         footer_layout.addWidget(self._status_label, 1, Qt.AlignVCenter)
 
-        self._close_button = QPushButton("Kapat", root_panel)
-        self._close_button.clicked.connect(self.close)
-        footer_layout.addWidget(self._close_button)
+        self._stop_button = QPushButton("Durdur", root_panel)
+        self._stop_button.clicked.connect(self.stop_requested.emit)
+        footer_layout.addWidget(self._stop_button)
 
         self._run_button = QPushButton("Çalıştır", root_panel)
         self._run_button.setObjectName("PrimaryButton")
@@ -124,7 +129,8 @@ class EditorWindow(QWidget):
     def set_busy(self, busy: bool, status_text: str | None = None) -> None:
         self._run_button.setDisabled(busy)
         self._speed_slider.setDisabled(busy)
-        self._close_button.setDisabled(False)
+        self._browser_mode_checkbox.setDisabled(busy)
+        self._stop_button.setDisabled(False)
         if status_text is not None:
             self._status_label.setText(status_text)
             return
@@ -142,7 +148,10 @@ class EditorWindow(QWidget):
         self.close()
 
     def _emit_run_requested(self) -> None:
-        self.run_requested.emit(self._text_edit.toPlainText())
+        self.run_requested.emit(
+            self._text_edit.toPlainText(),
+            self._browser_mode_checkbox.isChecked(),
+        )
 
     def _handle_speed_changed(self, value: int) -> None:
         self._update_speed_label(value)

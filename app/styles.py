@@ -92,6 +92,23 @@ QLabel#SpeedValueLabel {
     background: transparent;
 }
 
+QCheckBox {
+    spacing: 10px;
+}
+
+QCheckBox::indicator {
+    width: 18px;
+    height: 18px;
+    border: 1px solid #93b6b1;
+    border-radius: 5px;
+    background: #ffffff;
+}
+
+QCheckBox::indicator:checked {
+    background: #0f766e;
+    border-color: #0f766e;
+}
+
 QSlider::groove:horizontal {
     border: none;
     height: 8px;

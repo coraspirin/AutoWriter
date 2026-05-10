@@ -3,6 +3,9 @@ from __future__ import annotations
 import ctypes
 import time
 from ctypes import wintypes
+from threading import Event
+
+from app.services.exceptions import TypingCancelled
 
 WindowHandle = int
 
@@ -15,6 +18,9 @@ KEYEVENTF_UNICODE = 0x0004
 SW_RESTORE = 9
 VK_RETURN = 0x0D
 VK_TAB = 0x09
+VK_SHIFT = 0x10
+VK_CONTROL = 0x11
+VK_MENU = 0x12
 ULONG_PTR = ctypes.c_size_t
 
 
@@ -63,89 +69,64 @@ class INPUT(ctypes.Structure):
 user32.SendInput.argtypes = (wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int)
 user32.SendInput.restype = wintypes.UINT
 
-user32.GetWindowThreadProcessId.argtypes = (wintypes.HWND, ctypes.POINTER(wintypes.DWORD))
-user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+user32.GetKeyboardLayout.argtypes = (wintypes.DWORD,)
+user32.GetKeyboardLayout.restype = wintypes.HKL
 
-user32.AttachThreadInput.argtypes = (wintypes.DWORD, wintypes.DWORD, wintypes.BOOL)
-user32.AttachThreadInput.restype = wintypes.BOOL
-
-user32.SetForegroundWindow.argtypes = (wintypes.HWND,)
-user32.SetForegroundWindow.restype = wintypes.BOOL
-
-user32.BringWindowToTop.argtypes = (wintypes.HWND,)
-user32.BringWindowToTop.restype = wintypes.BOOL
-
-user32.ShowWindow.argtypes = (wintypes.HWND, ctypes.c_int)
-user32.ShowWindow.restype = wintypes.BOOL
-
-user32.IsWindow.argtypes = (wintypes.HWND,)
-user32.IsWindow.restype = wintypes.BOOL
-
-user32.IsIconic.argtypes = (wintypes.HWND,)
-user32.IsIconic.restype = wintypes.BOOL
-
-
-def get_foreground_window() -> WindowHandle | None:
-    hwnd = int(user32.GetForegroundWindow())
-    return hwnd or None
-
-
-def is_window(hwnd: WindowHandle) -> bool:
-    return bool(user32.IsWindow(hwnd))
-
-
-def restore_window(hwnd: WindowHandle) -> bool:
-    if not hwnd or not is_window(hwnd):
-        return False
-
-    if user32.IsIconic(hwnd):
-        user32.ShowWindow(hwnd, SW_RESTORE)
-
-    current_foreground = get_foreground_window()
-    current_thread = (
-        user32.GetWindowThreadProcessId(current_foreground, None) if current_foreground else 0
-    )
-    target_thread = user32.GetWindowThreadProcessId(hwnd, None)
-    app_thread = kernel32.GetCurrentThreadId()
-
-    attached_threads: list[tuple[int, int]] = []
-
-    def attach_thread(source_thread: int, destination_thread: int) -> None:
-        if (
-            source_thread
-            and destination_thread
-            and source_thread != destination_thread
-            and user32.AttachThreadInput(source_thread, destination_thread, True)
-        ):
-            attached_threads.append((source_thread, destination_thread))
-
-    attach_thread(current_thread, app_thread)
-    attach_thread(target_thread, app_thread)
-
-    user32.BringWindowToTop(hwnd)
-    restored = bool(user32.SetForegroundWindow(hwnd))
-
-    for source_thread, destination_thread in reversed(attached_threads):
-        user32.AttachThreadInput(source_thread, destination_thread, False)
-
-    return restored
+user32.VkKeyScanExW.argtypes = (wintypes.WCHAR, wintypes.HKL)
+user32.VkKeyScanExW.restype = ctypes.c_short
 
 
 def send_text_with_send_input(
     text: str,
     delay_seconds: float,
     line_break_delay_seconds: float,
+    cancel_event: Event | None = None,
 ) -> None:
     for character in text:
+        _ensure_not_cancelled(cancel_event)
+
         if character == "\n":
             _send_virtual_key(VK_RETURN)
-            _sleep(line_break_delay_seconds)
+            _sleep(line_break_delay_seconds, cancel_event)
         elif character == "\t":
             _send_virtual_key(VK_TAB)
-            _sleep(delay_seconds)
+            _sleep(delay_seconds, cancel_event)
         else:
             _send_unicode_character(character)
-            _sleep(delay_seconds)
+            _sleep(delay_seconds, cancel_event)
+
+
+def send_text_with_virtual_keys(
+    text: str,
+    delay_seconds: float,
+    line_break_delay_seconds: float,
+    cancel_event: Event | None = None,
+) -> None:
+    keyboard_layout = user32.GetKeyboardLayout(0)
+
+    for character in text:
+        _ensure_not_cancelled(cancel_event)
+
+        if character == "\n":
+            _send_virtual_key(VK_RETURN)
+            _sleep(line_break_delay_seconds, cancel_event)
+            continue
+
+        if character == "\t":
+            _send_virtual_key(VK_TAB)
+            _sleep(delay_seconds, cancel_event)
+            continue
+
+        key_info = user32.VkKeyScanExW(character, keyboard_layout)
+        if key_info == -1:
+            _send_unicode_character(character)
+            _sleep(delay_seconds, cancel_event)
+            continue
+
+        virtual_key = key_info & 0xFF
+        shift_state = (key_info >> 8) & 0xFF
+        _send_virtual_key_with_modifiers(virtual_key, shift_state)
+        _sleep(delay_seconds, cancel_event)
 
 
 def _send_unicode_character(character: str) -> None:
@@ -170,6 +151,33 @@ def _send_virtual_key(virtual_key: int) -> None:
     _send_input(inputs)
 
 
+def _send_virtual_key_with_modifiers(virtual_key: int, shift_state: int) -> None:
+    modifier_order: list[int] = []
+    if shift_state & 1:
+        modifier_order.append(VK_SHIFT)
+    if shift_state & 2:
+        modifier_order.append(VK_CONTROL)
+    if shift_state & 4:
+        modifier_order.append(VK_MENU)
+
+    events: list[INPUT] = []
+    for modifier in modifier_order:
+        events.append(INPUT(type=INPUT_KEYBOARD, ki=KEYBDINPUT(modifier, 0, 0, 0, 0)))
+
+    events.append(INPUT(type=INPUT_KEYBOARD, ki=KEYBDINPUT(virtual_key, 0, 0, 0, 0)))
+    events.append(
+        INPUT(type=INPUT_KEYBOARD, ki=KEYBDINPUT(virtual_key, 0, KEYEVENTF_KEYUP, 0, 0))
+    )
+
+    for modifier in reversed(modifier_order):
+        events.append(
+            INPUT(type=INPUT_KEYBOARD, ki=KEYBDINPUT(modifier, 0, KEYEVENTF_KEYUP, 0, 0))
+        )
+
+    typed_events = (INPUT * len(events))(*events)
+    _send_input(typed_events)
+
+
 def _send_input(inputs: ctypes.Array[INPUT]) -> None:
     ctypes.set_last_error(0)
     sent = user32.SendInput(len(inputs), inputs, ctypes.sizeof(INPUT))
@@ -181,6 +189,18 @@ def _send_input(inputs: ctypes.Array[INPUT]) -> None:
         raise RuntimeError("Windows klavye girdisi gönderilemedi.")
 
 
-def _sleep(seconds: float) -> None:
-    if seconds > 0:
-        time.sleep(seconds)
+def _sleep(seconds: float, cancel_event: Event | None) -> None:
+    if seconds <= 0:
+        return
+
+    elapsed = 0.0
+    while elapsed < seconds:
+        _ensure_not_cancelled(cancel_event)
+        step = min(0.05, seconds - elapsed)
+        time.sleep(step)
+        elapsed += step
+
+
+def _ensure_not_cancelled(cancel_event: Event | None) -> None:
+    if cancel_event is not None and cancel_event.is_set():
+        raise TypingCancelled("İşlem durduruldu.")
