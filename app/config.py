@@ -1,6 +1,6 @@
-APP_NAME = "Write From Clipboard"
-WINDOW_TITLE = "Write From Clipboard"
-TRAY_TOOLTIP = "Write From Clipboard"
+﻿APP_NAME = "Coraspirin Auto Writer"
+WINDOW_TITLE = "Coraspirin | Auto Writer"
+TRAY_TOOLTIP = "Coraspirin Auto Writer"
 
 WINDOW_MIN_WIDTH = 700
 WINDOW_MIN_HEIGHT = 540

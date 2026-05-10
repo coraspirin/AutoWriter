@@ -1,3 +1,4 @@
+﻿# powered by mucahid erdogan
 from __future__ import annotations
 
 import time
@@ -85,3 +86,5 @@ class TextTypingService:
     def _ensure_not_cancelled(self, cancel_event: Event | None) -> None:
         if cancel_event is not None and cancel_event.is_set():
             raise TypingCancelled("İşlem durduruldu.")
+
+

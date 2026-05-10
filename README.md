@@ -1,4 +1,4 @@
-# Write From Clipboard
+# Auto Writer
 
 Windows sistem tepsisinde çalışan, girilen metni aktif pencereye klavye ile yazıyormuş gibi gönderen bir masaüstü uygulaması.
 

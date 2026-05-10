@@ -1,1 +1,1 @@
-"""Write From Clipboard application package."""
+"""Auto Writer application package."""

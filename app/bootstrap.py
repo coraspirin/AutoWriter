@@ -1,3 +1,4 @@
+﻿# powered by mucahid erdogan
 from __future__ import annotations
 
 import sys
@@ -22,3 +23,4 @@ def run() -> int:
     window_application.start()
 
     return app.exec()
+

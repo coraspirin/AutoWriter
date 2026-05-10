@@ -1,4 +1,4 @@
-APP_STYLESHEET = """
+﻿APP_STYLESHEET = """
 QWidget {
     background-color: #eef4f3;
     color: #102a2c;
@@ -149,3 +149,4 @@ QLabel#CountdownNumber {
     font-weight: 700;
 }
 """
+

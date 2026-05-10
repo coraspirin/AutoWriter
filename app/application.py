@@ -1,3 +1,4 @@
+﻿# powered by mucahid erdogan
 from __future__ import annotations
 
 from threading import Event
@@ -25,13 +26,11 @@ class TypingWorker(QObject):
         self,
         typing_service: TextTypingService,
         text: str,
-        browser_compatible: bool,
         cancel_event: Event,
     ) -> None:
         super().__init__()
         self._typing_service = typing_service
         self._text = text
-        self._browser_compatible = browser_compatible
         self._cancel_event = cancel_event
 
     @Slot()
@@ -39,7 +38,7 @@ class TypingWorker(QObject):
         try:
             self._typing_service.type_text(
                 self._text,
-                self._browser_compatible,
+                True,
                 self._cancel_event,
             )
         except TypingCancelled as exc:
@@ -75,7 +74,6 @@ class WindowApplication(QObject):
         self._countdown_in_progress = False
         self._countdown_remaining = 0
         self._pending_text = ""
-        self._pending_browser_mode = True
         self._pending_exit = False
 
         self._editor_window.set_speed_value(10)
@@ -96,8 +94,8 @@ class WindowApplication(QObject):
         line_break_delay_seconds = max(0.2, delay_seconds * 2)
         self._typing_service.set_timing(delay_seconds, line_break_delay_seconds)
 
-    @Slot(str, bool)
-    def _handle_run_requested(self, text: str, browser_compatible: bool) -> None:
+    @Slot(str)
+    def _handle_run_requested(self, text: str) -> None:
         if self._typing_in_progress or self._countdown_in_progress:
             self._editor_window.set_busy(True, "Bir yazma işlemi zaten devam ediyor.")
             return
@@ -108,7 +106,6 @@ class WindowApplication(QObject):
             return
 
         self._pending_text = text
-        self._pending_browser_mode = browser_compatible
         self._begin_countdown()
 
     def _begin_countdown(self) -> None:
@@ -132,15 +129,14 @@ class WindowApplication(QObject):
         self._countdown_overlay.hide()
         self._typing_in_progress = True
         self._editor_window.set_busy(True, "Yazılıyor...")
-        self._start_typing(self._pending_text, self._pending_browser_mode)
+        self._start_typing(self._pending_text)
 
-    def _start_typing(self, text: str, browser_compatible: bool) -> None:
+    def _start_typing(self, text: str) -> None:
         self._cancel_event.clear()
         self._typing_thread = QThread(self)
         self._typing_worker = TypingWorker(
             self._typing_service,
             text,
-            browser_compatible,
             self._cancel_event,
         )
         self._typing_worker.moveToThread(self._typing_thread)
