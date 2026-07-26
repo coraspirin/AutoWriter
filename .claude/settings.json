@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.venv/Scripts/python.exe -m pip list)",
+      "Bash(.venv/Scripts/python.exe -m pip uninstall -y PySide6 PySide6_Addons)",
+      "Bash(rm -rf build)",
+      "Bash(.venv/Scripts/python.exe -m PyInstaller AutoWriter.spec --clean --noconfirm)",
+      "Bash(.venv/Scripts/python.exe -m pip install pyinstaller)",
+      "PowerShell(Set-Location \"e:\\\\DATA\\\\Projeler\\\\_Projeler\\\\Python\\\\Auto Writer\"; $p = Start-Process \".\\\\dist\\\\Auto Writer.exe\" -PassThru; Start-Sleep -Seconds 6; if \\(-not $p.HasExited\\) { Write-Output \"OK: process ayakta \\(PID $\\($p.Id\\)\\)\"; $w = \\(Get-Process -Id $p.Id\\).MainWindowTitle; Write-Output \"Pencere: '$w'\"; Stop-Process -Id $p.Id -Force; Write-Output \"kapatildi\" } else { Write-Output \"CRASH: exit code $\\($p.ExitCode\\)\" })",
+      "PowerShell(Set-Location \"e:\\\\DATA\\\\Projeler\\\\_Projeler\\\\Python\\\\Auto Writer\"; $p = Start-Process \".\\\\dist\\\\Auto Writer.exe\" -PassThru; Start-Sleep -Seconds 8; $proc = Get-Process -Id $p.Id -ErrorAction SilentlyContinue; if \\($proc\\) { $proc.Refresh\\(\\); Write-Output \\(\"Handle: \" + $proc.MainWindowHandle + \" | Baslik: '\" + $proc.MainWindowTitle + \"'\"\\); Stop-Process -Id $p.Id -Force } else { Write-Output \"process oldu\" })",
+      "PowerShell(Set-Location \"e:\\\\DATA\\\\Projeler\\\\_Projeler\\\\Python\\\\Auto Writer\"; foreach \\($i in 1..3\\) { $p = Start-Process \".\\\\dist\\\\Auto Writer.exe\" -PassThru; Start-Sleep -Seconds 5; $proc = Get-Process -Id $p.Id -ErrorAction SilentlyContinue; if \\($proc\\) { Write-Output \"$i - AYAKTA\"; Stop-Process -Id $p.Id -Force; Start-Sleep -Seconds 1 } else { Write-Output \"$i - CIKTI, exit=$\\($p.ExitCode\\)\" } })",
+      "Bash(sed -e \"s/name='Auto Writer'/name='AutoWriter_console'/\" -e 's/console=False/console=True/' AutoWriter.spec)",
+      "Bash(.venv/Scripts/python.exe -m PyInstaller AutoWriter_console.spec --noconfirm)",
+      "PowerShell(Set-Location \"e:\\\\DATA\\\\Projeler\\\\_Projeler\\\\Python\\\\Auto Writer\"; foreach \\($i in 1..4\\) { Write-Output \"--- deneme $i ---\"; $out = & \".\\\\dist\\\\AutoWriter_console.exe\" 2>&1 | Out-String; Write-Output \\(\"exit=\" + $LASTEXITCODE\\); if \\($out.Trim\\(\\)\\) { Write-Output $out.Trim\\(\\) } })",
+      "Bash(.venv/Scripts/python.exe -c \"from PySide6.QtWidgets import QApplication; import PySide6; print\\('VENV OK', PySide6.__version__\\)\")",
+      "Bash(.venv/Scripts/python.exe -m pip install --force-reinstall --no-cache-dir \"PySide6-Essentials>=6.7,<7\")",
+      "Bash(rm -f \"dist/Auto Writer.exe\" dist/AutoWriter_console.exe)",
+      "PowerShell(Set-Location \"e:\\\\DATA\\\\Projeler\\\\_Projeler\\\\Python\\\\Auto Writer\"; $psi = New-Object System.Diagnostics.ProcessStartInfo; $psi.FileName = \".\\\\dist\\\\AutoWriter_console.exe\"; $psi.RedirectStandardError = $true; $psi.UseShellExecute = $false; $p = [System.Diagnostics.Process]::Start\\($psi\\); Start-Sleep -Seconds 10; if \\(-not $p.HasExited\\) { Write-Output \"KONSOL: CALISIYOR - hata yok\"; $p.Kill\\(\\) } else { Write-Output \"KONSOL: COKTU\"; Write-Output $p.StandardError.ReadToEnd\\(\\) })",
+      "PowerShell(Set-Location \"e:\\\\DATA\\\\Projeler\\\\_Projeler\\\\Python\\\\Auto Writer\"; $p = Start-Process \".\\\\dist\\\\Auto Writer.exe\" -PassThru; Start-Sleep -Seconds 10; $proc = Get-Process -Id $p.Id -ErrorAction SilentlyContinue; if \\($proc\\) { $proc.Refresh\\(\\); $t = $proc.MainWindowTitle; Write-Output \"PENCERE BASLIGI: '$t'\"; if \\($t -eq \"Coraspirin | Auto Writer\"\\) { Write-Output \">>> DOGRULANDI: gercek uygulama penceresi acildi\" } else { Write-Output \">>> BEKLENMEYEN baslik\" }; Stop-Process -Id $p.Id -Force } else { Write-Output \">>> COKTU \\(exit $\\($p.ExitCode\\)\\)\" })",
+      "Bash(.venv/Scripts/python.exe -c ' *)",
+      "Bash(.venv/Scripts/python.exe \"C:/Users/mucah/AppData/Local/Temp/claude/e--DATA-Projeler--Projeler-Python-Auto-Writer/d5610b4e-85ff-4687-9e46-99512037fa75/scratchpad/ui_probe.py\")",
+      "Bash(.venv/Scripts/python.exe \"C:/Users/mucah/AppData/Local/Temp/claude/e--DATA-Projeler--Projeler-Python-Auto-Writer/d5610b4e-85ff-4687-9e46-99512037fa75/scratchpad/ui_shot.py\")",
+      "Bash(rm -f \"dist/Auto Writer.exe\")",
+      "Bash(.venv/Scripts/python.exe -c \"import app.bootstrap; print\\('IMPORT OK'\\)\")",
+      "Bash(.venv/Scripts/python.exe \"C:/Users/mucah/AppData/Local/Temp/claude/e--DATA-Projeler--Projeler-Python-Auto-Writer/d5610b4e-85ff-4687-9e46-99512037fa75/scratchpad/diff_test.py\")"
+    ]
+  }
+}

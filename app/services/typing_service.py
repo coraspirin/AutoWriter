@@ -1,90 +1,140 @@
-﻿# powered by mucahid erdogan
+# powered by mucahid erdogan
 from __future__ import annotations
 
 import time
 from threading import Event
+from typing import Callable
 
-from app.config import LINE_BREAK_DELAY_SECONDS, TYPE_DELAY_SECONDS
+from app.config import (
+    KEY_HOLD_SECONDS,
+    LINE_BREAK_EXTRA_SECONDS,
+    TYPE_CPS_DEFAULT,
+)
 from app.services.exceptions import TypingCancelled
-from app.services.windows_api import send_text_with_send_input, send_text_with_virtual_keys
+from app.services import windows_api
 
-try:
-    import keyboard
-except ImportError:  # pragma: no cover - dependency boundary
-    keyboard = None
+ProgressCallback = Callable[[int, int], None]
+FocusGuard = Callable[[], bool]
+
+MODIFIER_RELEASE_TIMEOUT_SECONDS = 2.0
 
 
 class TextTypingService:
-    def __init__(
-        self,
-        delay_seconds: float = TYPE_DELAY_SECONDS,
-        line_break_delay_seconds: float = LINE_BREAK_DELAY_SECONDS,
-    ) -> None:
-        self._delay_seconds = delay_seconds
-        self._line_break_delay_seconds = line_break_delay_seconds
+    def __init__(self, cps: int = TYPE_CPS_DEFAULT) -> None:
+        self._cps = cps
 
-    def set_timing(self, delay_seconds: float, line_break_delay_seconds: float) -> None:
-        self._delay_seconds = delay_seconds
-        self._line_break_delay_seconds = line_break_delay_seconds
+    def set_speed(self, cps: int) -> None:
+        self._cps = max(1, cps)
 
     def type_text(
         self,
         text: str,
-        browser_compatible: bool = False,
         cancel_event: Event | None = None,
+        progress_callback: ProgressCallback | None = None,
+        focus_guard: FocusGuard | None = None,
     ) -> None:
-        normalized_text = text.replace("\r\n", "\n").replace("\r", "\n")
-
-        if browser_compatible:
-            send_text_with_virtual_keys(
-                normalized_text,
-                self._delay_seconds,
-                self._line_break_delay_seconds,
-                cancel_event,
-            )
+        if not text:
             return
 
-        if keyboard is not None:
-            try:
-                self._type_with_keyboard(normalized_text, cancel_event)
-                return
-            except Exception:
-                pass
+        interval_seconds = 1.0 / max(1, self._cps)
+        keyboard_layout = windows_api.get_keyboard_layout()
+        dead_keys = windows_api.detect_dead_keys(set(text), keyboard_layout)
+        total_characters = len(text)
 
-        send_text_with_send_input(
-            normalized_text,
-            self._delay_seconds,
-            self._line_break_delay_seconds,
-            cancel_event,
+        with windows_api.TimerResolution():
+            self._wait_for_modifier_release(cancel_event)
+
+            for index, character in enumerate(text, start=1):
+                self._ensure_runnable(cancel_event, focus_guard)
+
+                extra_delay = self._send_character(character, keyboard_layout, dead_keys)
+
+                if progress_callback is not None:
+                    progress_callback(index, total_characters)
+
+                remaining = interval_seconds - KEY_HOLD_SECONDS + extra_delay
+                self._wait(remaining, cancel_event)
+
+    def _send_character(
+        self,
+        character: str,
+        keyboard_layout: int,
+        dead_keys: set[str],
+    ) -> float:
+        if character == "\n":
+            windows_api.send_scancode_key(windows_api.SC_RETURN, hold_seconds=KEY_HOLD_SECONDS)
+            # Kod editorlerinin otomatik girintisini her zaman temizle: metin
+            # kutusundaki neyse birebir o yazilsin, merdiven olusmasin.
+            self._clear_auto_indent()
+            return LINE_BREAK_EXTRA_SECONDS
+
+        if character == "\t":
+            windows_api.send_scancode_key(windows_api.SC_TAB, hold_seconds=KEY_HOLD_SECONDS)
+            return 0.0
+
+        if windows_api.send_character_as_scancode(character, keyboard_layout, KEY_HOLD_SECONDS):
+            # Olu tus (^ ~ ` ´): commit boslugu gonder ki aksan standalone cozulsun
+            # ve metindeki gercek bosluk yutulmasin.
+            if character in dead_keys:
+                windows_api.send_scancode_key(windows_api.SC_SPACE, hold_seconds=KEY_HOLD_SECONDS)
+            return 0.0
+
+        # Duzende olmayan nadir karakterler (emoji vb.) icin son care.
+        windows_api.send_unicode_character(character, KEY_HOLD_SECONDS)
+        return 0.0
+
+    def _clear_auto_indent(self) -> None:
+        """Kod editorleri Enter'dan sonra onceki satirin girintisini otomatik ekler.
+        Shift+Home ile o girinti secilir, Delete ile silinir; imlec sutun 0'a doner
+        ve satirin gercek girintisi kaynaktan sifirdan yazilir. Boylece merdiven
+        etkisi olusmaz. Duz metinde secim bos olur, Delete de en yeni bos satirin
+        saginda karakter olmadigindan zararsizdir."""
+        windows_api.send_scancode_with_shift(
+            windows_api.SC_HOME, extended=True, hold_seconds=KEY_HOLD_SECONDS
+        )
+        windows_api.send_scancode_key(
+            windows_api.SC_DELETE, extended=True, hold_seconds=KEY_HOLD_SECONDS
         )
 
-    def _type_with_keyboard(self, text: str, cancel_event: Event | None) -> None:
-        for character in text:
+    def _wait_for_modifier_release(self, cancel_event: Event | None) -> None:
+        """Kullanicinin elinde kalmis Ctrl/Alt/Shift/Win varsa birakmasini bekler,
+        sonra guvence icin keyup gonderir. Basili bir Ctrl, yazilan her karakteri
+        kisayola cevirir."""
+        deadline = time.perf_counter() + MODIFIER_RELEASE_TIMEOUT_SECONDS
+        while windows_api.held_modifier_keys():
             self._ensure_not_cancelled(cancel_event)
+            if time.perf_counter() >= deadline:
+                break
+            time.sleep(0.02)
 
-            if character == "\n":
-                keyboard.send("enter")
-                self._sleep(self._line_break_delay_seconds, cancel_event)
-            elif character == "\t":
-                keyboard.send("tab")
-                self._sleep(self._delay_seconds, cancel_event)
-            else:
-                keyboard.write(character, delay=0, exact=True)
-                self._sleep(self._delay_seconds, cancel_event)
+        windows_api.release_modifier_keys()
 
-    def _sleep(self, seconds: float, cancel_event: Event | None) -> None:
+    def _wait(self, seconds: float, cancel_event: Event | None) -> None:
         if seconds <= 0:
             return
 
-        elapsed = 0.0
-        while elapsed < seconds:
+        deadline = time.perf_counter() + seconds
+        while True:
             self._ensure_not_cancelled(cancel_event)
-            step = min(0.05, seconds - elapsed)
-            time.sleep(step)
-            elapsed += step
+            remaining = deadline - time.perf_counter()
+            if remaining <= 0:
+                return
+            if remaining > 0.0015:
+                time.sleep(min(remaining - 0.001, 0.02))
+                continue
+            windows_api.precise_sleep(remaining)
+            return
+
+    def _ensure_runnable(
+        self,
+        cancel_event: Event | None,
+        focus_guard: FocusGuard | None,
+    ) -> None:
+        self._ensure_not_cancelled(cancel_event)
+
+        if focus_guard is not None and not focus_guard():
+            raise TypingCancelled("Odak değişti, yazma durduruldu.")
 
     def _ensure_not_cancelled(self, cancel_event: Event | None) -> None:
         if cancel_event is not None and cancel_event.is_set():
             raise TypingCancelled("İşlem durduruldu.")
-
-

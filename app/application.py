@@ -3,23 +3,32 @@ from __future__ import annotations
 
 from threading import Event
 
-from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
+from PySide6.QtCore import QObject, QSettings, QThread, QTimer, Signal, Slot
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from app.config import (
     APP_NAME,
     COUNTDOWN_SECONDS,
-    TYPE_DELAY_MAX_SECONDS,
-    TYPE_DELAY_MIN_SECONDS,
-    TYPE_SPEED_SLIDER_MAX,
+    HOTKEY_ID_STOP,
+    HOTKEY_STOP_LABEL,
+    TYPE_CPS_DEFAULT,
+    TYPE_CPS_MAX,
+    TYPE_CPS_MIN,
+    VK_F10,
 )
 from app.services.exceptions import TypingCancelled
+from app.services.focus_tracker import FocusTracker
+from app.services.hotkeys import GlobalHotkeys
 from app.services.typing_service import TextTypingService
 from app.ui.countdown_overlay import CountdownOverlay
 from app.ui.editor_window import EditorWindow
 
+SETTINGS_ORG = "Coraspirin"
+SETTINGS_APP = "AutoWriter"
+
 
 class TypingWorker(QObject):
+    progress = Signal(int, int)
     finished = Signal(bool, str, bool)
 
     def __init__(
@@ -27,24 +36,27 @@ class TypingWorker(QObject):
         typing_service: TextTypingService,
         text: str,
         cancel_event: Event,
+        focus_guard,
     ) -> None:
         super().__init__()
         self._typing_service = typing_service
         self._text = text
         self._cancel_event = cancel_event
+        self._focus_guard = focus_guard
 
     @Slot()
     def run(self) -> None:
         try:
             self._typing_service.type_text(
                 self._text,
-                True,
-                self._cancel_event,
+                cancel_event=self._cancel_event,
+                progress_callback=self.progress.emit,
+                focus_guard=self._focus_guard,
             )
         except TypingCancelled as exc:
             self.finished.emit(False, str(exc), True)
             return
-        except Exception as exc:  # pragma: no cover
+        except Exception as exc:  # pragma: no cover - Windows API sinirinda
             self.finished.emit(False, str(exc), False)
             return
 
@@ -55,44 +67,71 @@ class WindowApplication(QObject):
     def __init__(self, qt_app: QApplication) -> None:
         super().__init__()
         self._qt_app = qt_app
+        self._settings = QSettings(SETTINGS_ORG, SETTINGS_APP)
         self._typing_service = TextTypingService()
-        self._editor_window = EditorWindow()
-        self._editor_window.run_requested.connect(self._handle_run_requested)
-        self._editor_window.speed_changed.connect(self._handle_speed_changed)
-        self._editor_window.stop_requested.connect(self.stop_operation)
-        self._editor_window.close_requested.connect(self.exit_application)
 
+        self._editor_window = EditorWindow()
         self._countdown_overlay = CountdownOverlay()
+        self._focus_tracker = FocusTracker(self)
+        self._hotkeys = GlobalHotkeys(self)
+
+        self._cancel_event = Event()
+        self._pending_text = ""
+        self._typing_in_progress = False
+        self._countdown_in_progress = False
+        self._countdown_remaining = 0
+        self._pending_exit = False
+        self._typing_thread: QThread | None = None
+        self._typing_worker: TypingWorker | None = None
+
         self._countdown_timer = QTimer(self)
         self._countdown_timer.setInterval(1000)
         self._countdown_timer.timeout.connect(self._advance_countdown)
 
-        self._typing_thread: QThread | None = None
-        self._typing_worker: TypingWorker | None = None
-        self._cancel_event = Event()
-        self._typing_in_progress = False
-        self._countdown_in_progress = False
-        self._countdown_remaining = 0
-        self._pending_text = ""
-        self._pending_exit = False
+        self._connect_signals()
 
-        self._editor_window.set_speed_value(10)
-        self._apply_speed_slider_value(10)
+    def _connect_signals(self) -> None:
+        self._editor_window.run_requested.connect(self._handle_run_requested)
+        self._editor_window.stop_requested.connect(self.stop_operation)
+        self._editor_window.close_requested.connect(self.exit_application)
+        self._editor_window.settings_changed.connect(self._handle_settings_changed)
+
+        self._hotkeys.triggered.connect(self._handle_hotkey)
 
     def start(self) -> None:
+        self._load_preferences()
         self._editor_window.show_normal()
 
-    @Slot(int)
-    def _handle_speed_changed(self, value: int) -> None:
-        self._apply_speed_slider_value(value)
+        self._focus_tracker.register_window(self._editor_window)
+        self._focus_tracker.register_window(self._countdown_overlay)
 
-    def _apply_speed_slider_value(self, value: int) -> None:
-        ratio = value / max(TYPE_SPEED_SLIDER_MAX, 1)
-        delay_seconds = TYPE_DELAY_MIN_SECONDS + (
-            (TYPE_DELAY_MAX_SECONDS - TYPE_DELAY_MIN_SECONDS) * ratio
+        self._qt_app.installNativeEventFilter(self._hotkeys)
+        failed = self._hotkeys.register(
+            int(self._editor_window.winId()),
+            {HOTKEY_ID_STOP: VK_F10},
         )
-        line_break_delay_seconds = max(0.2, delay_seconds * 2)
-        self._typing_service.set_timing(delay_seconds, line_break_delay_seconds)
+        if failed:
+            self._editor_window.set_busy(
+                False,
+                f"Uyarı: {HOTKEY_STOP_LABEL} kısayolu başka bir uygulama "
+                "tarafından kullanılıyor.",
+            )
+
+    # --- Tercihler ---------------------------------------------------------
+
+    def _load_preferences(self) -> None:
+        cps = self._settings.value("cps", TYPE_CPS_DEFAULT, type=int)
+        cps = min(max(cps, TYPE_CPS_MIN), TYPE_CPS_MAX)
+        self._editor_window.set_speed_value(cps)
+        self._typing_service.set_speed(cps)
+
+    @Slot()
+    def _handle_settings_changed(self) -> None:
+        cps = self._editor_window.speed_value()
+        self._typing_service.set_speed(cps)
+        self._settings.setValue("cps", cps)
+
+    # --- Yazma akisi -------------------------------------------------------
 
     @Slot(str)
     def _handle_run_requested(self, text: str) -> None:
@@ -100,12 +139,14 @@ class WindowApplication(QObject):
             self._editor_window.set_busy(True, "Bir yazma işlemi zaten devam ediyor.")
             return
 
-        if not text:
+        # \r\n -> \n disinda metne dokunmuyoruz; girinti dahil birebir yazilir.
+        normalized_text = text.replace("\r\n", "\n").replace("\r", "\n")
+        if not normalized_text:
             self._editor_window.set_busy(False, "Önce yazılacak metni girin.")
             self._editor_window.show_normal()
             return
 
-        self._pending_text = text
+        self._pending_text = normalized_text
         self._begin_countdown()
 
     def _begin_countdown(self) -> None:
@@ -128,20 +169,25 @@ class WindowApplication(QObject):
         self._countdown_in_progress = False
         self._countdown_overlay.hide()
         self._typing_in_progress = True
-        self._editor_window.set_busy(True, "Yazılıyor...")
+        self._focus_tracker.lock_target()
+        self._editor_window.set_busy(True, f"Yazılıyor... ({HOTKEY_STOP_LABEL} durdur)")
         self._start_typing(self._pending_text)
 
     def _start_typing(self, text: str) -> None:
         self._cancel_event.clear()
+        self._editor_window.set_progress(0, len(text), self._editor_window.speed_value())
+
         self._typing_thread = QThread(self)
         self._typing_worker = TypingWorker(
             self._typing_service,
             text,
             self._cancel_event,
+            self._focus_tracker.is_target_focused,
         )
         self._typing_worker.moveToThread(self._typing_thread)
 
         self._typing_thread.started.connect(self._typing_worker.run)
+        self._typing_worker.progress.connect(self._handle_progress)
         self._typing_worker.finished.connect(self._finish_typing)
         self._typing_worker.finished.connect(self._typing_thread.quit)
         self._typing_worker.finished.connect(self._typing_worker.deleteLater)
@@ -150,18 +196,24 @@ class WindowApplication(QObject):
 
         self._typing_thread.start()
 
+    @Slot(int, int)
+    def _handle_progress(self, done: int, total: int) -> None:
+        self._editor_window.set_progress(done, total, self._editor_window.speed_value())
+
     @Slot(bool, str, bool)
     def _finish_typing(self, success: bool, message: str, cancelled: bool) -> None:
         self._typing_in_progress = False
         self._pending_text = ""
         self._cancel_event.clear()
+        self._focus_tracker.release_target()
+        self._editor_window.clear_progress()
 
         if self._pending_exit:
             self._quit_application()
             return
 
         if cancelled:
-            self._editor_window.set_busy(False, "İşlem durduruldu.")
+            self._editor_window.set_busy(False, message)
             return
 
         if success:
@@ -176,6 +228,13 @@ class WindowApplication(QObject):
     def _clear_worker_references(self) -> None:
         self._typing_thread = None
         self._typing_worker = None
+
+    # --- Kontrol -----------------------------------------------------------
+
+    @Slot(int)
+    def _handle_hotkey(self, hotkey_id: int) -> None:
+        if hotkey_id == HOTKEY_ID_STOP:
+            self.stop_operation()
 
     @Slot()
     def stop_operation(self) -> None:
@@ -215,5 +274,7 @@ class WindowApplication(QObject):
 
     def _quit_application(self) -> None:
         self._cancel_countdown()
+        self._hotkeys.unregister_all()
+        self._qt_app.removeNativeEventFilter(self._hotkeys)
         self._editor_window.prepare_for_exit()
         self._qt_app.quit()
