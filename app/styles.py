@@ -92,8 +92,25 @@ QLabel#SpeedValueLabel {
     background: transparent;
 }
 
+QPushButton#ModeButton {
+    min-height: 34px;
+    min-width: 0;
+    border-radius: 12px;
+    font-size: 10pt;
+    padding: 0 12px;
+}
+
+QPushButton#ModeButton:checked {
+    background-color: #0f766e;
+    border-color: #0f766e;
+    color: #ffffff;
+    font-weight: 600;
+}
+
 QCheckBox {
     spacing: 10px;
+    font-size: 10pt;
+    background: transparent;
 }
 
 QCheckBox::indicator {

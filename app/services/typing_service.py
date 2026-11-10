@@ -6,9 +6,12 @@ from threading import Event
 from typing import Callable
 
 from app.config import (
-    KEY_HOLD_SECONDS,
-    LINE_BREAK_EXTRA_SECONDS,
-    TYPE_CPS_DEFAULT,
+    CLEAR_AUTO_INDENT_DEFAULT,
+    PROGRESS_EMIT_INTERVAL_SECONDS,
+    TYPE_CPS_MIN,
+    TYPING_PROFILE_DEFAULT,
+    TYPING_PROFILES,
+    TypingProfile,
 )
 from app.services.exceptions import TypingCancelled
 from app.services import windows_api
@@ -20,11 +23,20 @@ MODIFIER_RELEASE_TIMEOUT_SECONDS = 2.0
 
 
 class TextTypingService:
-    def __init__(self, cps: int = TYPE_CPS_DEFAULT) -> None:
-        self._cps = cps
+    def __init__(self) -> None:
+        self._profile: TypingProfile = TYPING_PROFILES[TYPING_PROFILE_DEFAULT]
+        self._cps = self._profile.cps_default
+        self._clear_indent = CLEAR_AUTO_INDENT_DEFAULT
+
+    def set_profile(self, profile: TypingProfile) -> None:
+        self._profile = profile
+        self._cps = min(self._cps, profile.cps_max)
 
     def set_speed(self, cps: int) -> None:
-        self._cps = max(1, cps)
+        self._cps = min(max(TYPE_CPS_MIN, cps), self._profile.cps_max)
+
+    def set_clear_auto_indent(self, enabled: bool) -> None:
+        self._clear_indent = enabled
 
     def type_text(
         self,
@@ -36,64 +48,90 @@ class TextTypingService:
         if not text:
             return
 
+        # Ayarlar yazma ortasinda degisirse tutarsizlik olmasin diye sabitlenir.
+        profile = self._profile
+        clear_indent = self._clear_indent
         interval_seconds = 1.0 / max(1, self._cps)
+
         keyboard_layout = windows_api.get_keyboard_layout()
         dead_keys = windows_api.detect_dead_keys(set(text), keyboard_layout)
         total_characters = len(text)
+        last_progress_emit = 0.0
 
         with windows_api.TimerResolution():
             self._wait_for_modifier_release(cancel_event)
 
+            # Mutlak zaman cizelgesi: Python ve SendInput'un karakter basina
+            # harcadigi sure bir sonraki beklemeden dusulur, birikmez.
+            next_send = time.perf_counter()
+
             for index, character in enumerate(text, start=1):
                 self._ensure_runnable(cancel_event, focus_guard)
+                self._wait_until(next_send, cancel_event)
 
-                extra_delay = self._send_character(character, keyboard_layout, dead_keys)
+                extra_delay = self._send_character(
+                    character, keyboard_layout, dead_keys, profile, clear_indent
+                )
 
-                if progress_callback is not None:
+                if profile.burst_size and index % profile.burst_size == 0:
+                    extra_delay += profile.burst_pause_seconds
+
+                now = time.perf_counter()
+                if progress_callback is not None and (
+                    index == total_characters
+                    or now - last_progress_emit >= PROGRESS_EMIT_INTERVAL_SECONDS
+                ):
                     progress_callback(index, total_characters)
+                    last_progress_emit = now
 
-                remaining = interval_seconds - KEY_HOLD_SECONDS + extra_delay
-                self._wait(remaining, cancel_event)
+                # Geride kalindiysa (ornegin SendInput tekrar denemesi) kaybedilen
+                # sureyi telafi etmek icin art arda yigin gonderme; simdiden say.
+                next_send = max(next_send + interval_seconds, now) + extra_delay
 
     def _send_character(
         self,
         character: str,
         keyboard_layout: int,
         dead_keys: set[str],
+        profile: TypingProfile,
+        clear_indent: bool,
     ) -> float:
+        hold = profile.key_hold_seconds
+
         if character == "\n":
-            windows_api.send_scancode_key(windows_api.SC_RETURN, hold_seconds=KEY_HOLD_SECONDS)
-            # Kod editorlerinin otomatik girintisini her zaman temizle: metin
-            # kutusundaki neyse birebir o yazilsin, merdiven olusmasin.
-            self._clear_auto_indent()
-            return LINE_BREAK_EXTRA_SECONDS
+            windows_api.send_scancode_key(windows_api.SC_RETURN, hold_seconds=hold)
+            if clear_indent:
+                # Kod editorlerinin otomatik girintisini temizle: metin
+                # kutusundaki neyse birebir o yazilsin, merdiven olusmasin.
+                self._clear_auto_indent(hold)
+            return profile.line_break_extra_seconds
 
         if character == "\t":
-            windows_api.send_scancode_key(windows_api.SC_TAB, hold_seconds=KEY_HOLD_SECONDS)
+            windows_api.send_scancode_key(windows_api.SC_TAB, hold_seconds=hold)
             return 0.0
 
-        if windows_api.send_character_as_scancode(character, keyboard_layout, KEY_HOLD_SECONDS):
+        if windows_api.send_character_as_scancode(character, keyboard_layout, hold):
             # Olu tus (^ ~ ` ´): commit boslugu gonder ki aksan standalone cozulsun
             # ve metindeki gercek bosluk yutulmasin.
             if character in dead_keys:
-                windows_api.send_scancode_key(windows_api.SC_SPACE, hold_seconds=KEY_HOLD_SECONDS)
+                windows_api.send_scancode_key(windows_api.SC_SPACE, hold_seconds=hold)
             return 0.0
 
         # Duzende olmayan nadir karakterler (emoji vb.) icin son care.
-        windows_api.send_unicode_character(character, KEY_HOLD_SECONDS)
+        windows_api.send_unicode_character(character, hold)
         return 0.0
 
-    def _clear_auto_indent(self) -> None:
+    def _clear_auto_indent(self, hold: float) -> None:
         """Kod editorleri Enter'dan sonra onceki satirin girintisini otomatik ekler.
         Shift+Home ile o girinti secilir, Delete ile silinir; imlec sutun 0'a doner
         ve satirin gercek girintisi kaynaktan sifirdan yazilir. Boylece merdiven
         etkisi olusmaz. Duz metinde secim bos olur, Delete de en yeni bos satirin
         saginda karakter olmadigindan zararsizdir."""
         windows_api.send_scancode_with_shift(
-            windows_api.SC_HOME, extended=True, hold_seconds=KEY_HOLD_SECONDS
+            windows_api.SC_HOME, extended=True, hold_seconds=hold
         )
         windows_api.send_scancode_key(
-            windows_api.SC_DELETE, extended=True, hold_seconds=KEY_HOLD_SECONDS
+            windows_api.SC_DELETE, extended=True, hold_seconds=hold
         )
 
     def _wait_for_modifier_release(self, cancel_event: Event | None) -> None:
@@ -109,17 +147,13 @@ class TextTypingService:
 
         windows_api.release_modifier_keys()
 
-    def _wait(self, seconds: float, cancel_event: Event | None) -> None:
-        if seconds <= 0:
-            return
-
-        deadline = time.perf_counter() + seconds
+    def _wait_until(self, deadline: float, cancel_event: Event | None) -> None:
         while True:
-            self._ensure_not_cancelled(cancel_event)
             remaining = deadline - time.perf_counter()
             if remaining <= 0:
                 return
             if remaining > 0.0015:
+                self._ensure_not_cancelled(cancel_event)
                 time.sleep(min(remaining - 0.001, 0.02))
                 continue
             windows_api.precise_sleep(remaining)

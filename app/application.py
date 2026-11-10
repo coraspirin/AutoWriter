@@ -11,9 +11,10 @@ from app.config import (
     COUNTDOWN_SECONDS,
     HOTKEY_ID_STOP,
     HOTKEY_STOP_LABEL,
-    TYPE_CPS_DEFAULT,
-    TYPE_CPS_MAX,
+    CLEAR_AUTO_INDENT_DEFAULT,
     TYPE_CPS_MIN,
+    TYPING_PROFILE_DEFAULT,
+    TYPING_PROFILES,
     VK_F10,
 )
 from app.services.exceptions import TypingCancelled
@@ -120,16 +121,33 @@ class WindowApplication(QObject):
     # --- Tercihler ---------------------------------------------------------
 
     def _load_preferences(self) -> None:
-        cps = self._settings.value("cps", TYPE_CPS_DEFAULT, type=int)
-        cps = min(max(cps, TYPE_CPS_MIN), TYPE_CPS_MAX)
+        mode = self._settings.value("mode", TYPING_PROFILE_DEFAULT, type=str)
+        if mode not in TYPING_PROFILES:
+            mode = TYPING_PROFILE_DEFAULT
+        profile = TYPING_PROFILES[mode]
+
+        cps = self._settings.value("cps", profile.cps_default, type=int)
+        cps = min(max(cps, TYPE_CPS_MIN), profile.cps_max)
+        clear_indent = self._settings.value(
+            "clear_auto_indent", CLEAR_AUTO_INDENT_DEFAULT, type=bool
+        )
+
+        self._editor_window.set_mode(mode)
         self._editor_window.set_speed_value(cps)
-        self._typing_service.set_speed(cps)
+        self._editor_window.set_clear_auto_indent(clear_indent)
+        self._apply_preferences()
 
     @Slot()
     def _handle_settings_changed(self) -> None:
-        cps = self._editor_window.speed_value()
-        self._typing_service.set_speed(cps)
-        self._settings.setValue("cps", cps)
+        self._apply_preferences()
+        self._settings.setValue("mode", self._editor_window.mode())
+        self._settings.setValue("cps", self._editor_window.speed_value())
+        self._settings.setValue("clear_auto_indent", self._editor_window.clear_auto_indent())
+
+    def _apply_preferences(self) -> None:
+        self._typing_service.set_profile(TYPING_PROFILES[self._editor_window.mode()])
+        self._typing_service.set_speed(self._editor_window.speed_value())
+        self._typing_service.set_clear_auto_indent(self._editor_window.clear_auto_indent())
 
     # --- Yazma akisi -------------------------------------------------------
 

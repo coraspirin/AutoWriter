@@ -4,6 +4,8 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
+    QButtonGroup,
+    QCheckBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -17,12 +19,19 @@ from PySide6.QtWidgets import (
 
 from app.config import (
     HOTKEY_STOP_LABEL,
-    TYPE_CPS_MAX,
     TYPE_CPS_MIN,
+    TYPING_PROFILES,
     WINDOW_MIN_HEIGHT,
     WINDOW_MIN_WIDTH,
     WINDOW_TITLE,
 )
+
+
+_MODE_TOOLTIPS = {
+    "safe": "Tarayıcıdan (HTML5) bağlanılan RDP için. En yavaş, en güvenilir.",
+    "fast": "Normal RDP (mstsc) için. Kısa tuş basımı, her 100 karakterde kısa mola.",
+    "turbo": "En hızlı. Tuş basımında bekleme yok; karakter kaybı olursa Hızlı'ya geçin.",
+}
 
 
 class EditorWindow(QWidget):
@@ -102,8 +111,27 @@ class EditorWindow(QWidget):
 
         layout.addLayout(speed_header)
 
+        mode_row = QHBoxLayout()
+        mode_row.setContentsMargins(0, 0, 0, 0)
+        mode_row.setSpacing(8)
+        self._mode_group = QButtonGroup(card)
+        self._mode_group.setExclusive(True)
+        self._mode_buttons: dict[str, QPushButton] = {}
+        for profile in TYPING_PROFILES.values():
+            button = QPushButton(profile.label, card)
+            button.setObjectName("ModeButton")
+            button.setCheckable(True)
+            button.setToolTip(_MODE_TOOLTIPS.get(profile.key, ""))
+            button.clicked.connect(
+                lambda _checked=False, key=profile.key: self._handle_mode_clicked(key)
+            )
+            self._mode_group.addButton(button)
+            self._mode_buttons[profile.key] = button
+            mode_row.addWidget(button, 1)
+        layout.addLayout(mode_row)
+
         self._speed_slider = QSlider(Qt.Horizontal, card)
-        self._speed_slider.setRange(TYPE_CPS_MIN, TYPE_CPS_MAX)
+        self._speed_slider.setRange(TYPE_CPS_MIN, 40)
         self._speed_slider.setSingleStep(1)
         self._speed_slider.setPageStep(5)
         self._speed_slider.valueChanged.connect(self._handle_speed_changed)
@@ -115,6 +143,15 @@ class EditorWindow(QWidget):
         speed_hint.addStretch(1)
         speed_hint.addWidget(QLabel("Hızlı", card))
         layout.addLayout(speed_hint)
+
+        self._indent_checkbox = QCheckBox("Kod girintisini temizle", card)
+        self._indent_checkbox.setToolTip(
+            "Kod editörlerinin Enter sonrası eklediği otomatik girintiyi siler "
+            "(her satırda Shift+Home, Delete).\n"
+            "Düz metin yazarken kapatmak satır başına zaman kazandırır."
+        )
+        self._indent_checkbox.toggled.connect(lambda _checked: self.settings_changed.emit())
+        layout.addWidget(self._indent_checkbox)
 
         return card
 
@@ -189,6 +226,29 @@ class EditorWindow(QWidget):
     def speed_value(self) -> int:
         return self._speed_slider.value()
 
+    def set_mode(self, key: str) -> None:
+        profile = TYPING_PROFILES[key]
+        self._mode_buttons[key].setChecked(True)
+        self._speed_slider.blockSignals(True)
+        self._speed_slider.setRange(TYPE_CPS_MIN, profile.cps_max)
+        self._speed_slider.setPageStep(max(5, profile.cps_max // 10))
+        self._speed_slider.blockSignals(False)
+        self._update_speed_label(self._speed_slider.value())
+
+    def mode(self) -> str:
+        for key, button in self._mode_buttons.items():
+            if button.isChecked():
+                return key
+        return next(iter(TYPING_PROFILES))
+
+    def set_clear_auto_indent(self, enabled: bool) -> None:
+        self._indent_checkbox.blockSignals(True)
+        self._indent_checkbox.setChecked(enabled)
+        self._indent_checkbox.blockSignals(False)
+
+    def clear_auto_indent(self) -> bool:
+        return self._indent_checkbox.isChecked()
+
     def prepare_for_exit(self) -> None:
         self._allow_close = True
         self.close()
@@ -197,6 +257,12 @@ class EditorWindow(QWidget):
 
     def _emit_run_requested(self) -> None:
         self.run_requested.emit(self._text_edit.toPlainText())
+
+    def _handle_mode_clicked(self, key: str) -> None:
+        # Mod degisince o modun varsayilan hizina gec.
+        self.set_mode(key)
+        self.set_speed_value(TYPING_PROFILES[key].cps_default)
+        self.settings_changed.emit()
 
     def _handle_speed_changed(self, value: int) -> None:
         self._update_speed_label(value)
