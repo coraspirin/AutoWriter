@@ -67,6 +67,28 @@ QPushButton:disabled {
     border-color: #d7e6e4;
 }
 
+QPushButton#UpdateButton {
+    background-color: #fff7ed;
+    border: 1px solid #f59e0b;
+    color: #9a3412;
+    min-height: 32px;
+    min-width: 0;
+    border-radius: 12px;
+    font-size: 10pt;
+    font-weight: 600;
+    padding: 0 14px;
+}
+
+QPushButton#UpdateButton:hover {
+    background-color: #ffedd5;
+}
+
+QPushButton#UpdateButton:disabled {
+    background-color: #fef3c7;
+    color: #92400e;
+    border-color: #fcd34d;
+}
+
 QLabel#StatusLabel {
     color: #486463;
     font-size: 10pt;

@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.config import (
+    APP_VERSION,
     HOTKEY_STOP_LABEL,
     TYPE_CPS_MIN,
     TYPING_PROFILES,
@@ -39,6 +40,7 @@ class EditorWindow(QWidget):
     stop_requested = Signal()
     close_requested = Signal()
     settings_changed = Signal()
+    update_requested = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -64,7 +66,20 @@ class EditorWindow(QWidget):
         panel_layout.setContentsMargins(20, 20, 20, 20)
         panel_layout.setSpacing(16)
 
-        panel_layout.addLayout(self._build_brand(root_panel))
+        header = QHBoxLayout()
+        header.setSpacing(12)
+        header.addLayout(self._build_brand(root_panel))
+        header.addStretch(1)
+
+        # Sag ust: yalnizca yeni surum bulununca gorunur.
+        self._update_button = QPushButton("", root_panel)
+        self._update_button.setObjectName("UpdateButton")
+        self._update_button.setCursor(Qt.PointingHandCursor)
+        self._update_button.setVisible(False)
+        self._update_button.clicked.connect(self.update_requested.emit)
+        header.addWidget(self._update_button, 0, Qt.AlignTop)
+
+        panel_layout.addLayout(header)
 
         self._text_edit = QTextEdit(root_panel)
         self._text_edit.setPlaceholderText(
@@ -84,7 +99,7 @@ class EditorWindow(QWidget):
         brand_label.setObjectName("BrandLabel")
         brand_layout.addWidget(brand_label)
 
-        brand_subtitle = QLabel("Auto Writer", parent)
+        brand_subtitle = QLabel(f"Auto Writer  v{APP_VERSION}", parent)
         brand_subtitle.setObjectName("BrandSubtitle")
         brand_layout.addWidget(brand_subtitle)
 
@@ -248,6 +263,22 @@ class EditorWindow(QWidget):
 
     def clear_auto_indent(self) -> bool:
         return self._indent_checkbox.isChecked()
+
+    def show_update_available(self, version: str) -> None:
+        self._update_button.setText(f"⬇  Güncelle  v{version}")
+        self._update_button.setToolTip(
+            f"Yeni sürüm hazır: v{version} (şu an v{APP_VERSION}). İndirip kurmak için tıklayın."
+        )
+        self._update_button.setEnabled(True)
+        self._update_button.setVisible(True)
+
+    def set_update_state(self, text: str, enabled: bool) -> None:
+        self._update_button.setText(text)
+        self._update_button.setEnabled(enabled)
+        self._update_button.setVisible(True)
+
+    def set_status(self, text: str) -> None:
+        self._status_label.setText(text)
 
     def prepare_for_exit(self) -> None:
         self._allow_close = True

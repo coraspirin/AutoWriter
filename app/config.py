@@ -1,3 +1,11 @@
+# Surum: her yayinda burayi artirin (MAJOR.MINOR.PATCH). Arayuzde gosterilir.
+APP_VERSION = "1.1.0"
+
+# Guncellemeler bu deponun GitHub Releases sayfasindan kontrol edilir. Release
+# etiketi "v1.2.0" biciminde olmali ve release'e bir .exe dosyasi eklenmeli.
+GITHUB_REPO = "coraspirin/AutoWriter"
+UPDATE_CHECK_DELAY_MS = 3000
+
 APP_NAME = "Coraspirin Auto Writer"
 WINDOW_TITLE = "Coraspirin | Auto Writer"
 TRAY_TOOLTIP = "Coraspirin Auto Writer"

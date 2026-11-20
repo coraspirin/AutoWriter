@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import time
+import unicodedata
 from threading import Event
 from typing import Callable
 
@@ -45,6 +46,10 @@ class TextTypingService:
         progress_callback: ProgressCallback | None = None,
         focus_guard: FocusGuard | None = None,
     ) -> None:
+        # PDF/web/macOS'tan kopyalanan metinde "ç" cogu zaman "c" + U+0327
+        # (birlesen cengel) olarak gelir. Birlesen isaret klavyede olmadigindan
+        # Unicode (VK_PACKET) ile gider ve RDP'de bozulur. NFC tek karaktere birlestirir.
+        text = unicodedata.normalize("NFC", text)
         if not text:
             return
 

@@ -23,6 +23,7 @@ from app.services.hotkeys import GlobalHotkeys
 from app.services.typing_service import TextTypingService
 from app.ui.countdown_overlay import CountdownOverlay
 from app.ui.editor_window import EditorWindow
+from app.update_controller import UpdateController
 
 SETTINGS_ORG = "Coraspirin"
 SETTINGS_APP = "AutoWriter"
@@ -85,6 +86,13 @@ class WindowApplication(QObject):
         self._typing_thread: QThread | None = None
         self._typing_worker: TypingWorker | None = None
 
+        self._update_controller = UpdateController(
+            self._editor_window,
+            is_busy=lambda: self._typing_in_progress or self._countdown_in_progress,
+            request_quit=self._quit_application,
+            parent=self,
+        )
+
         self._countdown_timer = QTimer(self)
         self._countdown_timer.setInterval(1000)
         self._countdown_timer.timeout.connect(self._advance_countdown)
@@ -102,6 +110,7 @@ class WindowApplication(QObject):
     def start(self) -> None:
         self._load_preferences()
         self._editor_window.show_normal()
+        self._update_controller.schedule_check()
 
         self._focus_tracker.register_window(self._editor_window)
         self._focus_tracker.register_window(self._countdown_overlay)
