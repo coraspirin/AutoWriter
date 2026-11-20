@@ -21,6 +21,9 @@ MAPVK_VK_TO_VSC_EX = 4
 
 VK_SPACE = 0x20
 
+# LoadKeyboardLayout: kabuga (dil cubuguna) haber verme.
+KLF_NOTELLSHELL = 0x00000080
+
 SW_RESTORE = 9
 
 VK_TAB = 0x09
@@ -102,6 +105,15 @@ user32.SendInput.restype = wintypes.UINT
 user32.GetKeyboardLayout.argtypes = (wintypes.DWORD,)
 user32.GetKeyboardLayout.restype = wintypes.HKL
 
+user32.GetKeyboardLayoutList.argtypes = (ctypes.c_int, ctypes.POINTER(wintypes.HKL))
+user32.GetKeyboardLayoutList.restype = ctypes.c_int
+
+user32.LoadKeyboardLayoutW.argtypes = (wintypes.LPCWSTR, wintypes.UINT)
+user32.LoadKeyboardLayoutW.restype = wintypes.HKL
+
+user32.UnloadKeyboardLayout.argtypes = (wintypes.HKL,)
+user32.UnloadKeyboardLayout.restype = wintypes.BOOL
+
 user32.VkKeyScanExW.argtypes = (wintypes.WCHAR, wintypes.HKL)
 user32.VkKeyScanExW.restype = ctypes.c_short
 
@@ -148,6 +160,47 @@ winmm.timeEndPeriod.restype = wintypes.UINT
 
 def get_keyboard_layout() -> int:
     return user32.GetKeyboardLayout(0)
+
+
+def keyboard_layout_list() -> list[int]:
+    count = user32.GetKeyboardLayoutList(0, None)
+    if count <= 0:
+        return []
+    buffer = (wintypes.HKL * count)()
+    count = user32.GetKeyboardLayoutList(count, buffer)
+    return [int(handle or 0) for handle in buffer[:count]]
+
+
+class TargetLayout:
+    """Yazma suresince hedef klavye duzenini saglar. klid None ise bu bilgisayarin
+    duzeni kullanilir. Duzen sistemde yuklu degilse KLF_ACTIVATE OLMADAN yuklenir
+    (kullanicinin aktif duzeni degismez) ve cikista geri kaldirilir; boylece dil
+    cubuguna kalici bir duzen eklenmez."""
+
+    def __init__(self, klid: str | None) -> None:
+        self._klid = klid
+        self._handle = 0
+        self._unload_on_exit = False
+
+    def __enter__(self) -> int:
+        if self._klid is None:
+            self._handle = get_keyboard_layout()
+            return self._handle
+
+        loaded_before = set(keyboard_layout_list())
+        handle = int(user32.LoadKeyboardLayoutW(self._klid, KLF_NOTELLSHELL) or 0)
+        if not handle:
+            # Yuklenemezse yerel duzenle devam et; yazma tamamen durmasin.
+            self._handle = get_keyboard_layout()
+            return self._handle
+
+        self._handle = handle
+        self._unload_on_exit = handle not in loaded_before
+        return handle
+
+    def __exit__(self, *_: object) -> None:
+        if self._unload_on_exit and self._handle:
+            user32.UnloadKeyboardLayout(wintypes.HKL(self._handle))
 
 
 def detect_dead_keys(characters: set[str], keyboard_layout: int) -> set[str]:

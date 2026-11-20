@@ -4,8 +4,8 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
-    QButtonGroup,
     QCheckBox,
+    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -20,19 +20,16 @@ from PySide6.QtWidgets import (
 from app.config import (
     APP_VERSION,
     HOTKEY_STOP_LABEL,
+    TAB_WIDTH_CHOICES,
+    TARGET_LAYOUTS,
+    TYPE_CPS_MAX,
     TYPE_CPS_MIN,
-    TYPING_PROFILES,
     WINDOW_MIN_HEIGHT,
     WINDOW_MIN_WIDTH,
     WINDOW_TITLE,
 )
 
 
-_MODE_TOOLTIPS = {
-    "safe": "Tarayıcıdan (HTML5) bağlanılan RDP için. En yavaş, en güvenilir.",
-    "fast": "Normal RDP (mstsc) için. Kısa tuş basımı, her 100 karakterde kısa mola.",
-    "turbo": "En hızlı. Tuş basımında bekleme yok; karakter kaybı olursa Hızlı'ya geçin.",
-}
 
 
 class EditorWindow(QWidget):
@@ -126,27 +123,9 @@ class EditorWindow(QWidget):
 
         layout.addLayout(speed_header)
 
-        mode_row = QHBoxLayout()
-        mode_row.setContentsMargins(0, 0, 0, 0)
-        mode_row.setSpacing(8)
-        self._mode_group = QButtonGroup(card)
-        self._mode_group.setExclusive(True)
-        self._mode_buttons: dict[str, QPushButton] = {}
-        for profile in TYPING_PROFILES.values():
-            button = QPushButton(profile.label, card)
-            button.setObjectName("ModeButton")
-            button.setCheckable(True)
-            button.setToolTip(_MODE_TOOLTIPS.get(profile.key, ""))
-            button.clicked.connect(
-                lambda _checked=False, key=profile.key: self._handle_mode_clicked(key)
-            )
-            self._mode_group.addButton(button)
-            self._mode_buttons[profile.key] = button
-            mode_row.addWidget(button, 1)
-        layout.addLayout(mode_row)
 
         self._speed_slider = QSlider(Qt.Horizontal, card)
-        self._speed_slider.setRange(TYPE_CPS_MIN, 40)
+        self._speed_slider.setRange(TYPE_CPS_MIN, TYPE_CPS_MAX)
         self._speed_slider.setSingleStep(1)
         self._speed_slider.setPageStep(5)
         self._speed_slider.valueChanged.connect(self._handle_speed_changed)
@@ -167,6 +146,43 @@ class EditorWindow(QWidget):
         )
         self._indent_checkbox.toggled.connect(lambda _checked: self.settings_changed.emit())
         layout.addWidget(self._indent_checkbox)
+
+        tab_row = QHBoxLayout()
+        tab_row.setContentsMargins(0, 0, 0, 0)
+        tab_row.setSpacing(8)
+        self._expand_tabs_checkbox = QCheckBox("Tab'ları boşluğa çevir", card)
+        self._expand_tabs_checkbox.setToolTip(
+            "Metindeki Tab karakterlerini yazmadan önce boşluğa çevirir.\n"
+            "Kod editörlerinde Tab otomatik tamamlamayı tetikleyebilir; boşluk birebir yazılır."
+        )
+        self._expand_tabs_checkbox.toggled.connect(self._handle_expand_tabs_toggled)
+        tab_row.addWidget(self._expand_tabs_checkbox)
+        self._tab_width_combo = QComboBox(card)
+        for width in TAB_WIDTH_CHOICES:
+            self._tab_width_combo.addItem(f"{width} boşluk", width)
+        self._tab_width_combo.currentIndexChanged.connect(lambda _i: self.settings_changed.emit())
+        tab_row.addWidget(self._tab_width_combo)
+        tab_row.addStretch(1)
+        layout.addLayout(tab_row)
+
+        layout_row = QHBoxLayout()
+        layout_row.setContentsMargins(0, 0, 0, 0)
+        layout_row.setSpacing(8)
+        layout_label = QLabel("Hedef klavye:", card)
+        layout_label.setObjectName("FieldLabel")
+        layout_row.addWidget(layout_label)
+        self._layout_combo = QComboBox(card)
+        for key, (label, _klid) in TARGET_LAYOUTS.items():
+            self._layout_combo.addItem(label, key)
+        self._layout_combo.setToolTip(
+            "Yazılan makinenin (ör. RDP'deki uzak bilgisayarın) klavye düzeni.\n"
+            "Uzak makinenin düzeni bu bilgisayardan farklıysa seçin; aksi halde "
+            "Türkçe harfler ve semboller yanlış çıkar."
+        )
+        self._layout_combo.currentIndexChanged.connect(lambda _i: self.settings_changed.emit())
+        layout_row.addWidget(self._layout_combo)
+        layout_row.addStretch(1)
+        layout.addLayout(layout_row)
 
         return card
 
@@ -241,20 +257,30 @@ class EditorWindow(QWidget):
     def speed_value(self) -> int:
         return self._speed_slider.value()
 
-    def set_mode(self, key: str) -> None:
-        profile = TYPING_PROFILES[key]
-        self._mode_buttons[key].setChecked(True)
-        self._speed_slider.blockSignals(True)
-        self._speed_slider.setRange(TYPE_CPS_MIN, profile.cps_max)
-        self._speed_slider.setPageStep(max(5, profile.cps_max // 10))
-        self._speed_slider.blockSignals(False)
-        self._update_speed_label(self._speed_slider.value())
+    def set_target_layout(self, key: str) -> None:
+        index = self._layout_combo.findData(key)
+        self._layout_combo.blockSignals(True)
+        self._layout_combo.setCurrentIndex(max(0, index))
+        self._layout_combo.blockSignals(False)
 
-    def mode(self) -> str:
-        for key, button in self._mode_buttons.items():
-            if button.isChecked():
-                return key
-        return next(iter(TYPING_PROFILES))
+    def target_layout(self) -> str:
+        return str(self._layout_combo.currentData())
+
+    def set_expand_tabs(self, enabled: bool, width: int) -> None:
+        self._expand_tabs_checkbox.blockSignals(True)
+        self._expand_tabs_checkbox.setChecked(enabled)
+        self._expand_tabs_checkbox.blockSignals(False)
+        index = self._tab_width_combo.findData(width)
+        self._tab_width_combo.blockSignals(True)
+        self._tab_width_combo.setCurrentIndex(max(0, index))
+        self._tab_width_combo.blockSignals(False)
+        self._tab_width_combo.setEnabled(enabled)
+
+    def expand_tabs(self) -> bool:
+        return self._expand_tabs_checkbox.isChecked()
+
+    def tab_width(self) -> int:
+        return int(self._tab_width_combo.currentData())
 
     def set_clear_auto_indent(self, enabled: bool) -> None:
         self._indent_checkbox.blockSignals(True)
@@ -289,10 +315,8 @@ class EditorWindow(QWidget):
     def _emit_run_requested(self) -> None:
         self.run_requested.emit(self._text_edit.toPlainText())
 
-    def _handle_mode_clicked(self, key: str) -> None:
-        # Mod degisince o modun varsayilan hizina gec.
-        self.set_mode(key)
-        self.set_speed_value(TYPING_PROFILES[key].cps_default)
+    def _handle_expand_tabs_toggled(self, checked: bool) -> None:
+        self._tab_width_combo.setEnabled(checked)
         self.settings_changed.emit()
 
     def _handle_speed_changed(self, value: int) -> None:

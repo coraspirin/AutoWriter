@@ -114,19 +114,29 @@ QLabel#SpeedValueLabel {
     background: transparent;
 }
 
-QPushButton#ModeButton {
-    min-height: 34px;
-    min-width: 0;
-    border-radius: 12px;
+QLabel#FieldLabel {
     font-size: 10pt;
-    padding: 0 12px;
+    background: transparent;
 }
 
-QPushButton#ModeButton:checked {
-    background-color: #0f766e;
-    border-color: #0f766e;
-    color: #ffffff;
-    font-weight: 600;
+QComboBox {
+    background-color: #ffffff;
+    border: 1px solid #c4d7d5;
+    border-radius: 10px;
+    padding: 4px 10px;
+    min-height: 26px;
+    font-size: 10pt;
+}
+
+QComboBox:disabled {
+    color: #6c8481;
+    background-color: #eef4f3;
+}
+
+QComboBox QAbstractItemView {
+    background-color: #ffffff;
+    selection-background-color: #0f766e;
+    selection-color: #ffffff;
 }
 
 QCheckBox {

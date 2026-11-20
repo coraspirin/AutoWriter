@@ -9,9 +9,10 @@ from typing import Callable
 from app.config import (
     CLEAR_AUTO_INDENT_DEFAULT,
     PROGRESS_EMIT_INTERVAL_SECONDS,
+    SAFE_PROFILE,
+    TARGET_LAYOUT_DEFAULT,
+    TARGET_LAYOUTS,
     TYPE_CPS_MIN,
-    TYPING_PROFILE_DEFAULT,
-    TYPING_PROFILES,
     TypingProfile,
 )
 from app.services.exceptions import TypingCancelled
@@ -25,13 +26,14 @@ MODIFIER_RELEASE_TIMEOUT_SECONDS = 2.0
 
 class TextTypingService:
     def __init__(self) -> None:
-        self._profile: TypingProfile = TYPING_PROFILES[TYPING_PROFILE_DEFAULT]
+        # Zamanlama her zaman Guvenli profille yapilir (mod secimi yok).
+        self._profile: TypingProfile = SAFE_PROFILE
         self._cps = self._profile.cps_default
         self._clear_indent = CLEAR_AUTO_INDENT_DEFAULT
+        self._target_layout = TARGET_LAYOUT_DEFAULT
 
-    def set_profile(self, profile: TypingProfile) -> None:
-        self._profile = profile
-        self._cps = min(self._cps, profile.cps_max)
+    def set_target_layout(self, key: str) -> None:
+        self._target_layout = key if key in TARGET_LAYOUTS else TARGET_LAYOUT_DEFAULT
 
     def set_speed(self, cps: int) -> None:
         self._cps = min(max(TYPE_CPS_MIN, cps), self._profile.cps_max)
@@ -57,13 +59,13 @@ class TextTypingService:
         profile = self._profile
         clear_indent = self._clear_indent
         interval_seconds = 1.0 / max(1, self._cps)
+        _label, layout_klid = TARGET_LAYOUTS[self._target_layout]
 
-        keyboard_layout = windows_api.get_keyboard_layout()
-        dead_keys = windows_api.detect_dead_keys(set(text), keyboard_layout)
         total_characters = len(text)
         last_progress_emit = 0.0
 
-        with windows_api.TimerResolution():
+        with windows_api.TargetLayout(layout_klid) as keyboard_layout, windows_api.TimerResolution():
+            dead_keys = windows_api.detect_dead_keys(set(text), keyboard_layout)
             self._wait_for_modifier_release(cancel_event)
 
             # Mutlak zaman cizelgesi: Python ve SendInput'un karakter basina

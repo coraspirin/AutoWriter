@@ -1,5 +1,5 @@
 # Surum: her yayinda burayi artirin (MAJOR.MINOR.PATCH). Arayuzde gosterilir.
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 
 # Guncellemeler bu deponun GitHub Releases sayfasindan kontrol edilir. Release
 # etiketi "v1.2.0" biciminde olmali ve release'e bir .exe dosyasi eklenmeli.
@@ -41,45 +41,39 @@ class TypingProfile:
     burst_pause_seconds: float
 
 
-# Hiz karakter/saniye olarak ifade edilir; ust sinir moda gore degisir.
+# Hiz karakter/saniye olarak ifade edilir.
 TYPE_CPS_MIN = 5
 
-TYPING_PROFILES: dict[str, TypingProfile] = {
-    # Eski davranis: tarayici (HTML5) RDP'de en guvenilir.
-    "safe": TypingProfile(
-        key="safe",
-        label="Güvenli",
-        cps_max=40,
-        cps_default=25,
-        key_hold_seconds=0.012,
-        line_break_extra_seconds=0.15,
-        burst_size=0,
-        burst_pause_seconds=0.0,
-    ),
-    # Normal RDP (mstsc) icin: kisa tus basimi + periyodik mola.
-    "fast": TypingProfile(
-        key="fast",
-        label="Hızlı",
-        cps_max=150,
-        cps_default=80,
-        key_hold_seconds=0.002,
-        line_break_extra_seconds=0.04,
-        burst_size=100,
-        burst_pause_seconds=0.08,
-    ),
-    # RDPPaste benzeri: bas/birak arasi bekleme yok, sik ama kisa molalar.
-    "turbo": TypingProfile(
-        key="turbo",
-        label="Turbo",
-        cps_max=400,
-        cps_default=200,
-        key_hold_seconds=0.0,
-        line_break_extra_seconds=0.015,
-        burst_size=200,
-        burst_pause_seconds=0.15,
-    ),
+# Tek yazma profili: Guvenli. Tarayici (HTML5) RDP dahil en guvenilir ayarlar.
+# Hizli/Turbo modlari kaldirildi; zamanlama her zaman bu profille yapilir.
+SAFE_PROFILE = TypingProfile(
+    key="safe",
+    label="Güvenli",
+    cps_max=40,
+    cps_default=25,
+    key_hold_seconds=0.012,
+    line_break_extra_seconds=0.15,
+    # RDPPaste'ten: her 50 karakterde kisa mola; uzak taraf tamponunu bosaltir.
+    burst_size=50,
+    burst_pause_seconds=0.10,
+)
+TYPE_CPS_MAX = SAFE_PROFILE.cps_max
+TYPE_CPS_DEFAULT = SAFE_PROFILE.cps_default
+
+# Hedef (uzak makine) klavye duzeni. Karakterler scan-code olarak gider ve uzak
+# taraf onlari KENDI duzenine gore cevirir; duzenler farkliysa harfler bozulur.
+# "auto" = bu bilgisayarin duzeni. Deger: KLID (LoadKeyboardLayout kimligi).
+TARGET_LAYOUTS: dict[str, tuple[str, str | None]] = {
+    "auto": ("Otomatik (bu bilgisayar)", None),
+    "tr_q": ("Türkçe Q", "0000041F"),
+    "us": ("İngilizce (US)", "00000409"),
 }
-TYPING_PROFILE_DEFAULT = "safe"
+TARGET_LAYOUT_DEFAULT = "auto"
+
+# Tab'lari yazmadan once bosluga cevir (IDE'lerde Tab otomatik tamamlama tetikler).
+EXPAND_TABS_DEFAULT = False
+TAB_WIDTH_CHOICES = (2, 4, 8)
+TAB_WIDTH_DEFAULT = 4
 
 # Kod editorlerinin Enter sonrasi ekledigi otomatik girintiyi temizle.
 CLEAR_AUTO_INDENT_DEFAULT = True
