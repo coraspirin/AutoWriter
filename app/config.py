@@ -1,5 +1,5 @@
 # Surum: her yayinda burayi artirin (MAJOR.MINOR.PATCH). Arayuzde gosterilir.
-APP_VERSION = "1.2.1"
+APP_VERSION = "1.2.2"
 
 # Guncellemeler bu deponun GitHub Releases sayfasindan kontrol edilir. Release
 # etiketi "v1.2.0" biciminde olmali ve release'e bir .exe dosyasi eklenmeli.

@@ -33,6 +33,8 @@ VK_CONTROL = 0x11
 VK_MENU = 0x12
 VK_LWIN = 0x5B
 VK_RWIN = 0x5C
+VK_LSHIFT = 0xA0
+VK_RMENU = 0xA5
 
 # Donanim scan-code'lari (set 1). Enter/Tab/Home/Delete browser RDP uyumu icin
 # gercek scan-code olarak gonderilir. Home/Delete "extended" tuslardir.
@@ -303,9 +305,22 @@ def send_unicode_character(character: str, hold_seconds: float = 0.0) -> None:
         for unit in code_units
     ]
 
-    _send_input(down_events)
-    precise_sleep(hold_seconds)
-    _send_input(up_events)
+    _press_and_release(down_events, up_events, hold_seconds)
+
+
+def _press_and_release(
+    down_events: list[INPUT],
+    up_events: list[INPUT],
+    hold_seconds: float,
+) -> None:
+    """Bas/bekle/birak. Basma ya da bekleme sirasinda hata olursa da birakma
+    olaylari gonderilir; aksi halde Shift/AltGr hedefte basili kalir ve
+    kullanicinin klavyesi bozuk davranir."""
+    try:
+        _send_input(down_events)
+        precise_sleep(hold_seconds)
+    finally:
+        _send_input(up_events)
 
 
 def _scan_input(scan_code: int, extended: bool, keyup: bool) -> INPUT:
@@ -318,9 +333,11 @@ def _scan_input(scan_code: int, extended: bool, keyup: bool) -> INPUT:
 
 
 def send_scancode_key(scan_code: int, extended: bool = False, hold_seconds: float = 0.0) -> None:
-    _send_input([_scan_input(scan_code, extended, keyup=False)])
-    precise_sleep(hold_seconds)
-    _send_input([_scan_input(scan_code, extended, keyup=True)])
+    _press_and_release(
+        [_scan_input(scan_code, extended, keyup=False)],
+        [_scan_input(scan_code, extended, keyup=True)],
+        hold_seconds,
+    )
 
 
 def send_scancode_with_shift(
@@ -330,18 +347,16 @@ def send_scancode_with_shift(
 ) -> None:
     """Shift basiliyken bir scan-code tusu gonderir. Otomatik girinti temizleme
     adiminda Shift+Home icin kullanilir."""
-    _send_input(
+    _press_and_release(
         [
             _scan_input(SC_LSHIFT, extended=False, keyup=False),
             _scan_input(scan_code, extended, keyup=False),
-        ]
-    )
-    precise_sleep(hold_seconds)
-    _send_input(
+        ],
         [
             _scan_input(scan_code, extended, keyup=True),
             _scan_input(SC_LSHIFT, extended=False, keyup=True),
-        ]
+        ],
+        hold_seconds,
     )
 
 
@@ -366,9 +381,14 @@ def send_character_as_scancode(
     virtual_key = scan_result & 0xFF
     modifier_state = (scan_result >> 8) & 0xFF
 
-    scan_code = user32.MapVirtualKeyExW(virtual_key, MAPVK_VK_TO_VSC_EX, keyboard_layout)
-    if not scan_code:
+    scan_code_ex = user32.MapVirtualKeyExW(virtual_key, MAPVK_VK_TO_VSC_EX, keyboard_layout)
+    if not scan_code_ex:
         return False
+
+    # _EX sonucu extended tuslarda 0xE0xx / 0xE1xx doner. wScan'e yalnizca alt
+    # bayt gider; on ek KEYEVENTF_EXTENDEDKEY bayragi ile bildirilir.
+    extended = (scan_code_ex >> 8) in (0xE0, 0xE1)
+    scan_code = scan_code_ex & 0xFF
 
     needs_shift = bool(modifier_state & VKKS_SHIFT)
     needs_altgr = bool(modifier_state & VKKS_CTRL_ALT)
@@ -383,12 +403,10 @@ def send_character_as_scancode(
         down_events.append(_scan_input(SC_LSHIFT, extended=False, keyup=False))
         up_events.insert(0, _scan_input(SC_LSHIFT, extended=False, keyup=True))
 
-    down_events.append(_scan_input(scan_code, extended=False, keyup=False))
-    up_events.insert(0, _scan_input(scan_code, extended=False, keyup=True))
+    down_events.append(_scan_input(scan_code, extended=extended, keyup=False))
+    up_events.insert(0, _scan_input(scan_code, extended=extended, keyup=True))
 
-    _send_input(down_events)
-    precise_sleep(hold_seconds)
-    _send_input(up_events)
+    _press_and_release(down_events, up_events, hold_seconds)
     return True
 
 
@@ -409,6 +427,23 @@ def release_modifier_keys() -> None:
     ]
     if events:
         _send_input(events)
+
+
+def release_injected_modifiers() -> None:
+    """Yazma bittiginde/kesildiginde, bizim enjekte ettigimiz Shift ve AltGr
+    hala basili gorunuyorsa scan-code keyup gonderir. Hata yutulur: bu bir
+    temizlik adimidir, asil hatayi gizlememeli."""
+    events = []
+    if user32.GetAsyncKeyState(VK_LSHIFT) & 0x8000:
+        events.append(_scan_input(SC_LSHIFT, extended=False, keyup=True))
+    if user32.GetAsyncKeyState(VK_RMENU) & 0x8000:
+        events.append(_scan_input(SC_RMENU, extended=True, keyup=True))
+    if not events:
+        return
+    try:
+        _send_input(events)
+    except RuntimeError:
+        pass
 
 
 def find_window_by_title(title: str) -> WindowHandle:
@@ -443,16 +478,19 @@ def _send_input(events: list[INPUT]) -> None:
     if not events:
         return
 
-    payload = (INPUT * len(events))(*events)
-
     # SendInput, ALT+TAB anlarinda veya yetkili bir pencere ondeyken (UIPI)
     # gecici olarak engellenebilir. Tek denemede pes etmek yazmayi ortasinda
-    # kesiyor; kisa gecikmelerle tekrar deniyoruz.
+    # kesiyor; kisa gecikmelerle tekrar deniyoruz. SendInput kac olayi
+    # ekledigini dondurur: tekrar denemede yalnizca KALANLAR gonderilir, yoksa
+    # basarili kisim (orn. Shift basma) ikinci kez gider.
+    remaining = list(events)
     for attempt in range(SEND_INPUT_RETRIES):
+        payload = (INPUT * len(remaining))(*remaining)
         ctypes.set_last_error(0)
         sent = user32.SendInput(len(payload), payload, ctypes.sizeof(INPUT))
-        if sent == len(payload):
+        if sent >= len(remaining):
             return
+        remaining = remaining[max(0, sent):]
 
         if attempt < SEND_INPUT_RETRIES - 1:
             time.sleep(SEND_INPUT_RETRY_DELAY_SECONDS)

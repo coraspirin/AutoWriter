@@ -1,6 +1,7 @@
 # powered by mucahid erdogan
 from __future__ import annotations
 
+import gc
 import time
 import unicodedata
 from threading import Event
@@ -61,6 +62,32 @@ class TextTypingService:
         interval_seconds = 1.0 / max(1, self._cps)
         _label, layout_klid = TARGET_LAYOUTS[self._target_layout]
 
+        # Cop toplayici yazma ortasinda calisirsa karakter araliginda ms'lik
+        # sicrama olur (RDP'de kayip kaynagi). Yazma surece kapali tutulur.
+        gc_was_enabled = gc.isenabled()
+        gc.disable()
+        try:
+            self._type_loop(
+                text, layout_klid, profile, clear_indent, interval_seconds,
+                cancel_event, progress_callback, focus_guard,
+            )
+        finally:
+            # Hata/iptal ne olursa olsun bizim bastigimiz Shift/AltGr basili kalmasin.
+            windows_api.release_injected_modifiers()
+            if gc_was_enabled:
+                gc.enable()
+
+    def _type_loop(
+        self,
+        text: str,
+        layout_klid: str | None,
+        profile: TypingProfile,
+        clear_indent: bool,
+        interval_seconds: float,
+        cancel_event: Event | None,
+        progress_callback: ProgressCallback | None,
+        focus_guard: FocusGuard | None,
+    ) -> None:
         total_characters = len(text)
         last_progress_emit = 0.0
 
