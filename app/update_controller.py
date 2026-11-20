@@ -22,6 +22,8 @@ class UpdateController(QObject):
     otomatik olarak kuyruga alir)."""
 
     _found = Signal(object)
+    _up_to_date = Signal()
+    _check_failed = Signal()
     _progress = Signal(int, int)
     _downloaded = Signal(str)
     _download_failed = Signal(str)
@@ -41,7 +43,11 @@ class UpdateController(QObject):
         self._downloading = False
         self._last_percent = -1
 
+        self._checking = False
         self._found.connect(self._handle_found)
+        self._up_to_date.connect(self._handle_up_to_date)
+        self._check_failed.connect(self._handle_check_failed)
+        self._editor_window.check_updates_requested.connect(self.check_now)
         self._progress.connect(self._handle_progress)
         self._downloaded.connect(self._handle_downloaded)
         self._download_failed.connect(self._handle_download_failed)
@@ -52,6 +58,10 @@ class UpdateController(QObject):
 
     @Slot()
     def check_now(self) -> None:
+        if self._checking or self._downloading:
+            return
+        self._checking = True
+        self._editor_window.set_update_check_state("checking")
         threading.Thread(target=self._check_worker, daemon=True).start()
 
     # --- Arka plan ---------------------------------------------------------
@@ -60,8 +70,11 @@ class UpdateController(QObject):
         try:
             release = updater.check_for_update()
         except updater.UpdateError:
-            return  # Internet yoksa sessizce gec; kullaniciyi rahatsiz etme.
-        if release is not None:
+            self._check_failed.emit()  # Internet yok, GitHub erisilemiyor...
+            return
+        if release is None:
+            self._up_to_date.emit()
+        else:
             self._found.emit(release)
 
     def _download_worker(self, release: updater.ReleaseInfo) -> None:
@@ -74,8 +87,24 @@ class UpdateController(QObject):
 
     # --- UI thread ---------------------------------------------------------
 
+    @Slot()
+    def _handle_up_to_date(self) -> None:
+        self._checking = False
+        self._release = None
+        self._editor_window.set_update_check_state("up_to_date")
+
+    @Slot()
+    def _handle_check_failed(self) -> None:
+        self._checking = False
+        if self._release is not None:
+            # Daha once yeni surum bulunduysa onu gostermeye devam et.
+            self._editor_window.show_update_available(self._release.version)
+            return
+        self._editor_window.set_update_check_state("failed")
+
     @Slot(object)
     def _handle_found(self, release: updater.ReleaseInfo) -> None:
+        self._checking = False
         self._release = release
         self._editor_window.show_update_available(release.version)
 

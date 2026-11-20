@@ -1,5 +1,5 @@
 # Surum: her yayinda burayi artirin (MAJOR.MINOR.PATCH). Arayuzde gosterilir.
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.2.1"
 
 # Guncellemeler bu deponun GitHub Releases sayfasindan kontrol edilir. Release
 # etiketi "v1.2.0" biciminde olmali ve release'e bir .exe dosyasi eklenmeli.
@@ -11,7 +11,7 @@ WINDOW_TITLE = "Coraspirin | Auto Writer"
 TRAY_TOOLTIP = "Coraspirin Auto Writer"
 
 WINDOW_MIN_WIDTH = 640
-WINDOW_MIN_HEIGHT = 560
+WINDOW_MIN_HEIGHT = 580
 
 FOCUS_POLL_INTERVAL_MS = 250
 COUNTDOWN_SECONDS = 4
@@ -64,16 +64,15 @@ TYPE_CPS_DEFAULT = SAFE_PROFILE.cps_default
 # taraf onlari KENDI duzenine gore cevirir; duzenler farkliysa harfler bozulur.
 # "auto" = bu bilgisayarin duzeni. Deger: KLID (LoadKeyboardLayout kimligi).
 TARGET_LAYOUTS: dict[str, tuple[str, str | None]] = {
-    "auto": ("Otomatik (bu bilgisayar)", None),
-    "tr_q": ("Türkçe Q", "0000041F"),
-    "us": ("İngilizce (US)", "00000409"),
+    "auto": ("Otomatik", None),
+    "tr_q": ("TR-Q", "0000041F"),
+    "us": ("US-US", "00000409"),
 }
 TARGET_LAYOUT_DEFAULT = "auto"
 
-# Tab'lari yazmadan once bosluga cevir (IDE'lerde Tab otomatik tamamlama tetikler).
-EXPAND_TABS_DEFAULT = False
-TAB_WIDTH_CHOICES = (2, 4, 8)
-TAB_WIDTH_DEFAULT = 4
+# Tab'lar yazmadan once her zaman bu kadar bosluga cevrilir (IDE'lerde Tab
+# otomatik tamamlama tetikler). Kullanici ayari degil; sabit.
+TAB_WIDTH = 4
 
 # Kod editorlerinin Enter sonrasi ekledigi otomatik girintiyi temizle.
 CLEAR_AUTO_INDENT_DEFAULT = True

@@ -6,6 +6,22 @@ QWidget {
     font-size: 12pt;
 }
 
+/* Etiketler bulunduklari kartin rengini alsin; aksi halde arkalarinda gri kutu cikar. */
+QLabel {
+    background: transparent;
+}
+
+QLabel#BrandLabel {
+    color: #0f766e;
+    font-size: 15pt;
+    font-weight: 700;
+}
+
+QLabel#BrandSubtitle {
+    color: #6c8481;
+    font-size: 9pt;
+}
+
 QWidget#RootPanel {
     background: qlineargradient(
         x1: 0, y1: 0, x2: 1, y2: 1,
@@ -114,9 +130,57 @@ QLabel#SpeedValueLabel {
     background: transparent;
 }
 
+QPushButton#IconButton {
+    background-color: #ffffff;
+    border: 1px solid #c4d7d5;
+    border-radius: 17px;
+    min-width: 32px;
+    max-width: 32px;
+    min-height: 32px;
+    max-height: 32px;
+    padding: 0;
+}
+
+QPushButton#IconButton:hover {
+    background-color: #e0f0ed;
+    border-color: #0f766e;
+}
+
+QPushButton#IconButton:disabled {
+    background-color: #eef4f3;
+    border-color: #d7e6e4;
+}
+
+QLabel#UpdateStatusLabel {
+    color: #6c8481;
+    font-size: 9pt;
+}
+
+QLabel#UpdateStatusLabel[state="up_to_date"] {
+    color: #0f766e;
+    font-weight: 600;
+}
+
+QLabel#UpdateStatusLabel[state="failed"] {
+    color: #b45309;
+}
+
 QLabel#FieldLabel {
-    font-size: 10pt;
+    color: #486463;
+    font-size: 9pt;
+    font-weight: 600;
     background: transparent;
+}
+
+QLabel#HintLabel {
+    color: #6c8481;
+    font-size: 9pt;
+    background: transparent;
+}
+
+QFrame#Divider {
+    background-color: #dbe8e6;
+    border: none;
 }
 
 QComboBox {

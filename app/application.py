@@ -12,9 +12,7 @@ from app.config import (
     HOTKEY_ID_STOP,
     HOTKEY_STOP_LABEL,
     CLEAR_AUTO_INDENT_DEFAULT,
-    EXPAND_TABS_DEFAULT,
-    TAB_WIDTH_CHOICES,
-    TAB_WIDTH_DEFAULT,
+    TAB_WIDTH,
     TARGET_LAYOUT_DEFAULT,
     TARGET_LAYOUTS,
     TYPE_CPS_DEFAULT,
@@ -137,23 +135,21 @@ class WindowApplication(QObject):
     def _load_preferences(self) -> None:
         # Eski surumlerden kalan mod tercihi artik kullanilmiyor (hep Guvenli).
         self._settings.remove("mode")
+        # Tab donusumu artik her zaman acik; eski secim anahtari temizlenir.
+        self._settings.remove("expand_tabs")
+        self._settings.remove("tab_width")
 
         cps = self._settings.value("cps", TYPE_CPS_DEFAULT, type=int)
         cps = min(max(cps, TYPE_CPS_MIN), TYPE_CPS_MAX)
         clear_indent = self._settings.value(
             "clear_auto_indent", CLEAR_AUTO_INDENT_DEFAULT, type=bool
         )
-        expand_tabs = self._settings.value("expand_tabs", EXPAND_TABS_DEFAULT, type=bool)
-        tab_width = self._settings.value("tab_width", TAB_WIDTH_DEFAULT, type=int)
-        if tab_width not in TAB_WIDTH_CHOICES:
-            tab_width = TAB_WIDTH_DEFAULT
         target_layout = self._settings.value("target_layout", TARGET_LAYOUT_DEFAULT, type=str)
         if target_layout not in TARGET_LAYOUTS:
             target_layout = TARGET_LAYOUT_DEFAULT
 
         self._editor_window.set_speed_value(cps)
         self._editor_window.set_clear_auto_indent(clear_indent)
-        self._editor_window.set_expand_tabs(expand_tabs, tab_width)
         self._editor_window.set_target_layout(target_layout)
         self._apply_preferences()
 
@@ -162,8 +158,6 @@ class WindowApplication(QObject):
         self._apply_preferences()
         self._settings.setValue("cps", self._editor_window.speed_value())
         self._settings.setValue("clear_auto_indent", self._editor_window.clear_auto_indent())
-        self._settings.setValue("expand_tabs", self._editor_window.expand_tabs())
-        self._settings.setValue("tab_width", self._editor_window.tab_width())
         self._settings.setValue("target_layout", self._editor_window.target_layout())
 
     def _apply_preferences(self) -> None:
@@ -186,10 +180,9 @@ class WindowApplication(QObject):
             self._editor_window.show_normal()
             return
 
-        if self._editor_window.expand_tabs():
-            # expandtabs sutuna gore hizalar: satir ortasindaki Tab da dogru
-            # sayida bosluga donusur.
-            normalized_text = normalized_text.expandtabs(self._editor_window.tab_width())
+        # Tab'lar her zaman bosluga cevrilir (kod editorlerinde Tab otomatik
+        # tamamlama tetikler). expandtabs sutuna gore hizalar.
+        normalized_text = normalized_text.expandtabs(TAB_WIDTH)
 
         self._pending_text = normalized_text
         self._begin_countdown()

@@ -53,3 +53,53 @@ def build_app_icon() -> QIcon:
 
     painter.end()
     return QIcon(pixmap)
+
+
+def build_refresh_icon(color: str = "#0f766e") -> QIcon:
+    """Birbirini takip eden iki yuvarlak ok (guncellemeleri denetle). Yuksek DPI
+    ekranlarda net gorunsun diye 64 px cizilir; buton bunu kucuk boyutta gosterir."""
+    import math
+
+    size = 64
+    center = QPointF(size / 2, size / 2)
+    radius = 19.0
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.transparent)
+
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing)
+
+    pen = QPen(QColor(color))
+    pen.setWidthF(6.0)
+    pen.setCapStyle(Qt.FlatCap)
+    painter.setPen(pen)
+    painter.setBrush(Qt.NoBrush)
+
+    circle = QRectF(center.x() - radius, center.y() - radius, radius * 2, radius * 2)
+    # Iki yay; aralarinda bosluk birakilir, her yayin sonunda ok basi olur.
+    # Qt acilari: 0 = saat 3 yonu, saat yonunun tersine artar.
+    arcs = ((40.0, 125.0), (220.0, 125.0))
+    for start, span in arcs:
+        path = QPainterPath()
+        path.arcMoveTo(circle, start)
+        path.arcTo(circle, start, span)
+        painter.drawPath(path)
+
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(QColor(color))
+    for start, span in arcs:
+        theta = math.radians(start + span)
+        point = QPointF(center.x() + radius * math.cos(theta), center.y() - radius * math.sin(theta))
+        direction = QPointF(-math.sin(theta), -math.cos(theta))  # yay yonunde teget
+        normal = QPointF(math.cos(theta), -math.sin(theta))  # disa dogru
+        tip = point + direction * 11
+        base_back = point - direction * 2
+        arrow = QPainterPath()
+        arrow.moveTo(tip)
+        arrow.lineTo(base_back + normal * 9)
+        arrow.lineTo(base_back - normal * 9)
+        arrow.closeSubpath()
+        painter.drawPath(arrow)
+
+    painter.end()
+    return QIcon(pixmap)

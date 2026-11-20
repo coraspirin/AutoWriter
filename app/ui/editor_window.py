@@ -1,7 +1,7 @@
 # powered by mucahid erdogan
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -20,7 +20,6 @@ from PySide6.QtWidgets import (
 from app.config import (
     APP_VERSION,
     HOTKEY_STOP_LABEL,
-    TAB_WIDTH_CHOICES,
     TARGET_LAYOUTS,
     TYPE_CPS_MAX,
     TYPE_CPS_MIN,
@@ -28,8 +27,7 @@ from app.config import (
     WINDOW_MIN_WIDTH,
     WINDOW_TITLE,
 )
-
-
+from app.resources import build_refresh_icon
 
 
 class EditorWindow(QWidget):
@@ -38,6 +36,7 @@ class EditorWindow(QWidget):
     close_requested = Signal()
     settings_changed = Signal()
     update_requested = Signal()
+    check_updates_requested = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -68,13 +67,35 @@ class EditorWindow(QWidget):
         header.addLayout(self._build_brand(root_panel))
         header.addStretch(1)
 
-        # Sag ust: yalnizca yeni surum bulununca gorunur.
+        # Sag ust: [durum yazisi] [Guncelle (yeni surum varsa)] [denetle ikonu]
+        update_row = QHBoxLayout()
+        update_row.setContentsMargins(0, 0, 0, 0)
+        update_row.setSpacing(8)
+
+        self._update_status_label = QLabel("", root_panel)
+        self._update_status_label.setObjectName("UpdateStatusLabel")
+        self._update_status_label.setVisible(False)
+        update_row.addWidget(self._update_status_label, 0, Qt.AlignVCenter)
+
         self._update_button = QPushButton("", root_panel)
         self._update_button.setObjectName("UpdateButton")
         self._update_button.setCursor(Qt.PointingHandCursor)
         self._update_button.setVisible(False)
         self._update_button.clicked.connect(self.update_requested.emit)
-        header.addWidget(self._update_button, 0, Qt.AlignTop)
+        update_row.addWidget(self._update_button, 0, Qt.AlignVCenter)
+
+        self._check_button = QPushButton("", root_panel)
+        self._check_button.setObjectName("IconButton")
+        self._check_button.setIcon(build_refresh_icon())
+        self._check_button.setIconSize(QSize(18, 18))
+        self._check_button.setFixedSize(34, 34)
+        self._check_button.setCursor(Qt.PointingHandCursor)
+        self._check_button.setToolTip("Güncellemeleri denetle")
+        self._check_button.clicked.connect(self.check_updates_requested.emit)
+        update_row.addWidget(self._check_button, 0, Qt.AlignVCenter)
+
+        header.addLayout(update_row)
+        header.setAlignment(update_row, Qt.AlignTop)
 
         panel_layout.addLayout(header)
 
@@ -116,13 +137,13 @@ class EditorWindow(QWidget):
         speed_title = QLabel("Yazma Hızı", card)
         speed_title.setObjectName("SectionLabel")
         speed_header.addWidget(speed_title)
+        speed_header.addStretch(1)
 
         self._speed_value_label = QLabel("", card)
         self._speed_value_label.setObjectName("SpeedValueLabel")
-        speed_header.addWidget(self._speed_value_label, 0, Qt.AlignRight)
+        speed_header.addWidget(self._speed_value_label)
 
         layout.addLayout(speed_header)
-
 
         self._speed_slider = QSlider(Qt.Horizontal, card)
         self._speed_slider.setRange(TYPE_CPS_MIN, TYPE_CPS_MAX)
@@ -133,10 +154,26 @@ class EditorWindow(QWidget):
 
         speed_hint = QHBoxLayout()
         speed_hint.setContentsMargins(0, 0, 0, 0)
-        speed_hint.addWidget(QLabel("Yavaş", card))
+        slow_label = QLabel("Yavaş", card)
+        slow_label.setObjectName("HintLabel")
+        fast_label = QLabel("Hızlı", card)
+        fast_label.setObjectName("HintLabel")
+        speed_hint.addWidget(slow_label)
         speed_hint.addStretch(1)
-        speed_hint.addWidget(QLabel("Hızlı", card))
+        speed_hint.addWidget(fast_label)
         layout.addLayout(speed_hint)
+
+        divider = QFrame(card)
+        divider.setObjectName("Divider")
+        divider.setFixedHeight(1)
+        layout.addSpacing(2)
+        layout.addWidget(divider)
+        layout.addSpacing(2)
+
+        # Ayarlar tek satirda: solda girinti secimi, sagda hedef klavye.
+        settings_row = QHBoxLayout()
+        settings_row.setContentsMargins(0, 0, 0, 0)
+        settings_row.setSpacing(10)
 
         self._indent_checkbox = QCheckBox("Kod girintisini temizle", card)
         self._indent_checkbox.setToolTip(
@@ -145,44 +182,26 @@ class EditorWindow(QWidget):
             "Düz metin yazarken kapatmak satır başına zaman kazandırır."
         )
         self._indent_checkbox.toggled.connect(lambda _checked: self.settings_changed.emit())
-        layout.addWidget(self._indent_checkbox)
+        settings_row.addWidget(self._indent_checkbox)
+        settings_row.addStretch(1)
 
-        tab_row = QHBoxLayout()
-        tab_row.setContentsMargins(0, 0, 0, 0)
-        tab_row.setSpacing(8)
-        self._expand_tabs_checkbox = QCheckBox("Tab'ları boşluğa çevir", card)
-        self._expand_tabs_checkbox.setToolTip(
-            "Metindeki Tab karakterlerini yazmadan önce boşluğa çevirir.\n"
-            "Kod editörlerinde Tab otomatik tamamlamayı tetikleyebilir; boşluk birebir yazılır."
-        )
-        self._expand_tabs_checkbox.toggled.connect(self._handle_expand_tabs_toggled)
-        tab_row.addWidget(self._expand_tabs_checkbox)
-        self._tab_width_combo = QComboBox(card)
-        for width in TAB_WIDTH_CHOICES:
-            self._tab_width_combo.addItem(f"{width} boşluk", width)
-        self._tab_width_combo.currentIndexChanged.connect(lambda _i: self.settings_changed.emit())
-        tab_row.addWidget(self._tab_width_combo)
-        tab_row.addStretch(1)
-        layout.addLayout(tab_row)
-
-        layout_row = QHBoxLayout()
-        layout_row.setContentsMargins(0, 0, 0, 0)
-        layout_row.setSpacing(8)
-        layout_label = QLabel("Hedef klavye:", card)
+        layout_label = QLabel("Hedef klavye", card)
         layout_label.setObjectName("FieldLabel")
-        layout_row.addWidget(layout_label)
+        settings_row.addWidget(layout_label)
         self._layout_combo = QComboBox(card)
         for key, (label, _klid) in TARGET_LAYOUTS.items():
             self._layout_combo.addItem(label, key)
         self._layout_combo.setToolTip(
             "Yazılan makinenin (ör. RDP'deki uzak bilgisayarın) klavye düzeni.\n"
+            "Otomatik: bu bilgisayarın düzeni. TR-Q: Türkçe Q. US-US: İngilizce (ABD).\n"
             "Uzak makinenin düzeni bu bilgisayardan farklıysa seçin; aksi halde "
             "Türkçe harfler ve semboller yanlış çıkar."
         )
         self._layout_combo.currentIndexChanged.connect(lambda _i: self.settings_changed.emit())
-        layout_row.addWidget(self._layout_combo)
-        layout_row.addStretch(1)
-        layout.addLayout(layout_row)
+        self._layout_combo.setFixedWidth(130)
+        settings_row.addWidget(self._layout_combo)
+
+        layout.addLayout(settings_row)
 
         return card
 
@@ -266,22 +285,6 @@ class EditorWindow(QWidget):
     def target_layout(self) -> str:
         return str(self._layout_combo.currentData())
 
-    def set_expand_tabs(self, enabled: bool, width: int) -> None:
-        self._expand_tabs_checkbox.blockSignals(True)
-        self._expand_tabs_checkbox.setChecked(enabled)
-        self._expand_tabs_checkbox.blockSignals(False)
-        index = self._tab_width_combo.findData(width)
-        self._tab_width_combo.blockSignals(True)
-        self._tab_width_combo.setCurrentIndex(max(0, index))
-        self._tab_width_combo.blockSignals(False)
-        self._tab_width_combo.setEnabled(enabled)
-
-    def expand_tabs(self) -> bool:
-        return self._expand_tabs_checkbox.isChecked()
-
-    def tab_width(self) -> int:
-        return int(self._tab_width_combo.currentData())
-
     def set_clear_auto_indent(self, enabled: bool) -> None:
         self._indent_checkbox.blockSignals(True)
         self._indent_checkbox.setChecked(enabled)
@@ -290,7 +293,30 @@ class EditorWindow(QWidget):
     def clear_auto_indent(self) -> bool:
         return self._indent_checkbox.isChecked()
 
+    def set_update_check_state(self, state: str) -> None:
+        """state: checking | up_to_date | failed. Yeni surum durumu icin
+        show_update_available kullanilir."""
+        texts = {
+            "checking": "Denetleniyor…",
+            "up_to_date": "✓ Güncel",
+            "failed": "Denetlenemedi",
+        }
+        self._update_status_label.setText(texts.get(state, ""))
+        self._update_status_label.setProperty("state", state)
+        # Dinamik ozellik degisince QSS yeniden uygulansin (renk duruma gore).
+        self._update_status_label.style().unpolish(self._update_status_label)
+        self._update_status_label.style().polish(self._update_status_label)
+        self._update_status_label.setVisible(state in texts)
+        self._update_status_label.setToolTip(
+            f"Bu sürüm (v{APP_VERSION}) en günceli." if state == "up_to_date" else ""
+        )
+        self._check_button.setEnabled(state != "checking")
+        if state != "checking":
+            self._update_button.setVisible(False)
+
     def show_update_available(self, version: str) -> None:
+        self._update_status_label.setVisible(False)
+        self._check_button.setEnabled(True)
         self._update_button.setText(f"⬇  Güncelle  v{version}")
         self._update_button.setToolTip(
             f"Yeni sürüm hazır: v{version} (şu an v{APP_VERSION}). İndirip kurmak için tıklayın."
@@ -314,10 +340,6 @@ class EditorWindow(QWidget):
 
     def _emit_run_requested(self) -> None:
         self.run_requested.emit(self._text_edit.toPlainText())
-
-    def _handle_expand_tabs_toggled(self, checked: bool) -> None:
-        self._tab_width_combo.setEnabled(checked)
-        self.settings_changed.emit()
 
     def _handle_speed_changed(self, value: int) -> None:
         self._update_speed_label(value)
